@@ -10,11 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      # Checkout del DESTINO usando el GITHUB_TOKEN automático
       - name: Checkout destino
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}   # ← Token automático, no necesitas GH_PAT aquí
+          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
           
       - name: Configurar git
@@ -39,8 +38,5 @@ jobs:
           git checkout ${{ steps.get_branch.outputs.main_branch }}
           git merge upstream/${{ steps.get_branch.outputs.main_branch }} --allow-unrelated-histories --no-edit
           
-      # Push al DESTINO - aquí sí podrías necesitar GH_PAT si el destino es privado,
-      # pero como es público y el GITHUB_TOKEN tiene permisos de escritura en el mismo repo,
-      # también funciona con GITHUB_TOKEN. Si ves errores de permisos, vuelve a GH_PAT.
       - name: Push cambios al destino
         run: git push origin ${{ steps.get_branch.outputs.main_branch }}
