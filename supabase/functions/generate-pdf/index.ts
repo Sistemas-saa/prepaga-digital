@@ -1,7 +1,65 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { sanitizeHtml, detectThreats, escapeHtml } from "../_shared/html-sanitizer.ts"
-import { checkRateLimit, rateLimitResponse, getClientIdentifier } from "../_shared/rate-limiter.ts"
+
+// --- Inlined: _shared/html-sanitizer.ts ---
+const DANGEROUS_PATTERNS = [
+  /<script[\s>]/gi, /javascript\s*:/gi, /on\w+\s*=/gi,
+  /data\s*:\s*text\/html/gi, /vbscript\s*:/gi, /<iframe[\s>]/gi,
+  /<object[\s>]/gi, /<embed[\s>]/gi, /<applet[\s>]/gi, /<form[\s>]/gi,
+  /<input[\s>]/gi, /<button[\s>]/gi, /<meta[\s>]/gi, /<link[\s>]/gi,
+  /<base[\s>]/gi, /expression\s*\(/gi, /url\s*\(\s*['"]?\s*javascript/gi,
+];
+function sanitizeHtml(html: string): string {
+  if (!html || typeof html !== 'string') return '';
+  let s = html;
+  s = s.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  for (const tag of ['iframe','object','embed','applet','form','input','button','meta','link','base']) {
+    s = s.replace(new RegExp(`<${tag}\\b[^>]*\\/?>`, 'gi'), '');
+    s = s.replace(new RegExp(`</${tag}>`, 'gi'), '');
+  }
+  s = s.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  s = s.replace(/(href|src)\s*=\s*["']?\s*(javascript|vbscript)\s*:/gi, '$1="about:blank"');
+  s = s.replace(/expression\s*\([^)]*\)/gi, '');
+  return s;
+}
+function detectThreats(html: string): string[] {
+  if (!html) return [];
+  const threats: string[] = [];
+  for (const p of DANGEROUS_PATTERNS) { p.lastIndex = 0; if (p.test(html)) threats.push(p.source); }
+  return threats;
+}
+function escapeHtml(unsafe: string): string {
+  if (!unsafe || typeof unsafe !== 'string') return '';
+  return unsafe.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+
+// --- Inlined: _shared/rate-limiter.ts ---
+const _requestCounts = new Map<string, { count: number; windowStart: number }>();
+function checkRateLimit(identifier: string, options: { windowMs: number; maxRequests: number } = { windowMs: 15*60*1000, maxRequests: 100 }) {
+  const now = Date.now();
+  const entry = _requestCounts.get(identifier);
+  if (_requestCounts.size > 10000) {
+    for (const [k, v] of _requestCounts.entries()) { if (now - v.windowStart > options.windowMs) _requestCounts.delete(k); }
+  }
+  if (!entry || now - entry.windowStart > options.windowMs) {
+    _requestCounts.set(identifier, { count: 1, windowStart: now });
+    return { allowed: true, remaining: options.maxRequests - 1 };
+  }
+  entry.count++;
+  if (entry.count > options.maxRequests) {
+    return { allowed: false, remaining: 0, retryAfterMs: options.windowMs - (now - entry.windowStart) };
+  }
+  return { allowed: true, remaining: options.maxRequests - entry.count };
+}
+function rateLimitResponse(corsHeaders: Record<string, string>, retryAfterMs?: number) {
+  return new Response(JSON.stringify({ error: "Too many requests. Please try again later." }), {
+    status: 429,
+    headers: { ...corsHeaders, "Content-Type": "application/json", ...(retryAfterMs ? { "Retry-After": String(Math.ceil(retryAfterMs / 1000)) } : {}) },
+  });
+}
+function getClientIdentifier(req: Request): string {
+  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -135,6 +193,12 @@ serve(async (req) => {
       if (saleError) {
         console.error('Error fetching sale:', saleError)
       } else if (sale) {
+        // Fix timezone: 'YYYY-MM-DD' parsed as UTC shifts day back 1 in Paraguay (UTC-4)
+        const formatDateLocal = (d: string | null) => {
+          if (!d) return ''
+          return new Date(d.includes('T') ? d : d + 'T00:00:00').toLocaleDateString('es-ES')
+        }
+
         processedContent = interpolateTemplateVariables(processedContent, {
           cliente: {
             nombre: sale.clients?.first_name || '',
@@ -158,7 +222,7 @@ serve(async (req) => {
             direccion: sale.companies?.address || '',
           },
           venta: {
-            fecha: sale.sale_date ? new Date(sale.sale_date).toLocaleDateString('es-ES') : '',
+            fecha: formatDateLocal(sale.sale_date || null),
             total: sale.total_amount || 0,
             totalFormateado: `$${(sale.total_amount || 0).toLocaleString()}`,
             numeroContrato: sale.contract_number || '',
@@ -266,7 +330,7 @@ function generateBeneficiariesTableHTML(beneficiaries: any[]): string {
             <td style="border: 1px solid #d1d5db; padding: 8px;">${b.first_name || ''} ${b.last_name || ''}</td>
             <td style="border: 1px solid #d1d5db; padding: 8px;">${b.document_number || b.dni || ''}</td>
             <td style="border: 1px solid #d1d5db; padding: 8px;">${b.relationship || 'Titular'}</td>
-            <td style="border: 1px solid #d1d5db; padding: 8px;">${b.birth_date ? new Date(b.birth_date).toLocaleDateString('es-ES') : ''}</td>
+            <td style="border: 1px solid #d1d5db; padding: 8px;">${b.birth_date ? new Date(b.birth_date.includes('T') ? b.birth_date : b.birth_date + 'T00:00:00').toLocaleDateString('es-ES') : ''}</td>
             <td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">$${(b.amount || 0).toLocaleString()}</td>
           </tr>
         `).join('')}

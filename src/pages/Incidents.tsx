@@ -14,11 +14,9 @@ import {
   User,
   UserRoundCheck,
 } from 'lucide-react';
-import { IncidentForm } from '@/components/incidents/IncidentForm';
 import { IncidentPriorityBadge, IncidentStatusBadge } from '@/components/incidents/IncidentStatusBadge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
@@ -52,7 +50,6 @@ export default function Incidents() {
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | 'all'>('all');
   const [priorityFilter, setPriorityFilter] = useState<IncidentPriority | 'all'>('all');
   const [scopeFilter, setScopeFilter] = useState<IncidentScope>('all');
-  const [showCreate, setShowCreate] = useState(false);
 
   const filters = useMemo(
     () => ({
@@ -101,7 +98,7 @@ export default function Incidents() {
           </div>
         </div>
 
-        <Button onClick={() => setShowCreate(true)} className="w-full sm:w-auto sm:min-w-44">
+        <Button onClick={() => navigate('/incidents/new')} className="w-full sm:w-auto sm:min-w-44">
           <Plus className="mr-2 h-4 w-4" />
           Nueva incidencia
         </Button>
@@ -240,7 +237,7 @@ export default function Incidents() {
                   : 'Puedes abrir la primera incidencia y empezar a seguirla desde aquí.'}
               </p>
             </div>
-            <Button variant="outline" onClick={() => setShowCreate(true)}>
+            <Button variant="outline" onClick={() => navigate('/incidents/new')}>
               Crear incidencia
             </Button>
           </CardContent>
@@ -257,23 +254,6 @@ export default function Incidents() {
         </div>
       )}
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="max-h-[calc(100dvh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-5xl overflow-y-auto p-4 sm:p-6">
-          <DialogHeader>
-            <DialogTitle>Nueva incidencia</DialogTitle>
-            <DialogDescription>
-              Reporta el problema con contexto claro para que el análisis y la resolución sean más rápidos.
-            </DialogDescription>
-          </DialogHeader>
-          <IncidentForm
-            onSuccess={(id) => {
-              setShowCreate(false);
-              navigate(`/incidents/${id}`);
-            }}
-            onCancel={() => setShowCreate(false)}
-          />
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 
-import { lazy, Suspense, Component, ReactNode } from "react";
+import { lazy, Suspense, Component, ReactNode, type ComponentType } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -8,9 +8,9 @@ import { SimpleAuthProvider } from "@/components/SimpleAuthProvider";
 import { CompanyBrandingProvider } from "@/components/CompanyBrandingProvider";
 
 // Helper: retry dynamic imports once then force-reload on chunk errors
-function lazyRetry(importFn: () => Promise<any>) {
+function lazyRetry<T extends ComponentType<Record<string, unknown>>>(importFn: () => Promise<{ default: T }>) {
   return lazy(() =>
-    importFn().catch((error) => {
+    importFn().catch((error: unknown) => {
       // If chunk failed to load, reload the page once
       const hasReloaded = sessionStorage.getItem('chunk_reload');
       if (!hasReloaded) {
@@ -45,6 +45,7 @@ const TemplateEdit = lazyRetry(() => import("@/pages/TemplateEdit"));
 const SignatureWorkflow = lazyRetry(() => import("@/pages/SignatureWorkflow"));
 const Analytics = lazyRetry(() => import("@/pages/Analytics"));
 const Incidents = lazyRetry(() => import("@/pages/Incidents"));
+const IncidentNew = lazyRetry(() => import("@/pages/IncidentNew"));
 const IncidentDetail = lazyRetry(() => import("@/pages/IncidentDetail"));
 const Profile = lazyRetry(() => import("@/pages/Profile"));
 const Users = lazyRetry(() => import("@/pages/Users"));
@@ -145,6 +146,7 @@ const App = () => {
                   <Route path="signature-workflow/:saleId" element={<SignatureWorkflow />} />
                   <Route path="analytics" element={<Analytics />} />
                   <Route path="incidents" element={<Incidents />} />
+                  <Route path="incidents/new" element={<IncidentNew />} />
                   <Route path="incidents/:id" element={<IncidentDetail />} />
                   <Route path="profile" element={<Profile />} />
                   <Route
