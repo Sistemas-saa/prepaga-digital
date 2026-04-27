@@ -622,7 +622,7 @@ export const ROLE_PERMISSIONS: Record<AppRole, RolePermissions> = {
     audit: {
       access: true,
       approve: true,
-      reject: true,
+      reject: false,
       viewAll: false, // solo sus propias ventas
       assignAuditor: false,
     },

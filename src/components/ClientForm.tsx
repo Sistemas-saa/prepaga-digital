@@ -11,6 +11,7 @@ import { useCreateClient, useUpdateClient } from "@/hooks/useClients";
 import { useSimpleAuthContext } from "@/components/SimpleAuthProvider";
 import { Database } from "@/integrations/supabase/types";
 import { toast } from "sonner";
+import { normalizeDateInputValue } from "@/lib/dateOnly";
 
 type Client = Database["public"]["Tables"]["clients"]["Row"];
 
@@ -225,7 +226,7 @@ export function ClientForm({ open, onOpenChange, client }: ClientFormProps) {
         email: client.email || "",
         phone: client.phone || "",
         dni: client.dni || "",
-        birth_date: client.birth_date || "",
+        birth_date: normalizeDateInputValue(client.birth_date),
         gender: (client as any).gender || "",
         marital_status: (client as any).marital_status || "",
         address: client.address || "",
@@ -290,6 +291,7 @@ export function ClientForm({ open, onOpenChange, client }: ClientFormProps) {
       }
 
       data.phone = normalizePhone(data.phone);
+      data.birth_date = normalizeDateInputValue(data.birth_date) || undefined;
 
       const { latitude: _lat, longitude: _lng, ...cleanData } = data;
 

@@ -126,7 +126,7 @@ export const DEFAULT_WORKFLOW_CONFIG: WorkflowConfig = {
       id: 'default-2',
       from: 'en_auditoria',
       to: 'aprobado_para_templates',
-      allowed_roles: ['auditor', 'admin', 'super_admin'],
+      allowed_roles: ['vendedor', 'auditor', 'admin', 'super_admin'],
       conditions: [],
       require_note: false,
     },

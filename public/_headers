@@ -1,0 +1,32 @@
+# Cache-Control headers para Netlify / Cloudflare Pages
+
+# sw.js y build-version.json: NUNCA cachear — deben ser siempre frescos
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/build-version.json
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+# index.html: NUNCA cachear — punto de entrada de la SPA
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+# Raíz también apunta a index.html
+/
+  Cache-Control: no-cache, no-store, must-revalidate
+
+# Assets con hash de Vite: cachear agresivamente (1 año) — el hash cambia con cada build
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Iconos y manifesto: cache moderado
+/icons/*
+  Cache-Control: public, max-age=86400
+/manifest.json
+  Cache-Control: public, max-age=86400

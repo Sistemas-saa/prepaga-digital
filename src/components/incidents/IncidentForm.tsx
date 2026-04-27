@@ -59,7 +59,7 @@ const buildDescription = (values: FormData) =>
     .join('\n');
 
 export const IncidentForm = ({ onSuccess, onCancel }: Props) => {
-  const { companyId } = useSimpleAuthContext() as { companyId?: string | null };
+  const { profile } = useSimpleAuthContext();
   const createIncident = useCreateIncident();
   const uploadAttachment = useUploadAttachment();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -136,7 +136,7 @@ export const IncidentForm = ({ onSuccess, onCancel }: Props) => {
       module: data.module,
       priority: data.priority as IncidentPriority,
       description: buildDescription(data),
-      company_id: companyId || undefined,
+      company_id: profile?.company_id || undefined,
     });
 
     const uploadResults = await Promise.allSettled(
@@ -155,15 +155,20 @@ export const IncidentForm = ({ onSuccess, onCancel }: Props) => {
   const isLoading = createIncident.isPending || uploadAttachment.isPending;
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1.2fr)_220px_220px]">
-        <div className="space-y-1.5">
+    <form onSubmit={handleSubmit(onSubmit)} className="w-full min-w-0 space-y-4 sm:space-y-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_220px_220px]">
+        <div className="min-w-0 space-y-1.5 sm:col-span-2 xl:col-span-1">
           <Label htmlFor="title">Título de la incidencia</Label>
-          <Input id="title" placeholder="Ej: Error al generar PDF en ventas" {...register('title')} />
+          <Input
+            id="title"
+            placeholder="Ej: Error al generar PDF en ventas"
+            className="[overflow-wrap:anywhere]"
+            {...register('title')}
+          />
           {errors.title && <p className="text-xs text-destructive">{errors.title.message}</p>}
         </div>
 
-        <div className="space-y-1.5">
+        <div className="min-w-0 space-y-1.5">
           <Label>Módulo afectado</Label>
           <Select onValueChange={(value) => setValue('module', value, { shouldValidate: true })}>
             <SelectTrigger>
@@ -180,7 +185,7 @@ export const IncidentForm = ({ onSuccess, onCancel }: Props) => {
           {errors.module && <p className="text-xs text-destructive">{errors.module.message}</p>}
         </div>
 
-        <div className="space-y-1.5">
+        <div className="min-w-0 space-y-1.5">
           <Label>Prioridad</Label>
           <Select
             defaultValue="media"
@@ -203,45 +208,49 @@ export const IncidentForm = ({ onSuccess, onCancel }: Props) => {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-1.5">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+        <div className="min-w-0 space-y-1.5">
           <Label htmlFor="summary">1. Resumen del problema</Label>
           <Textarea
             id="summary"
             rows={4}
+            className="min-h-28 resize-y [overflow-wrap:anywhere]"
             placeholder="Describe en una frase qué está fallando y en qué contexto."
             {...register('summary')}
           />
           {errors.summary && <p className="text-xs text-destructive">{errors.summary.message}</p>}
         </div>
 
-        <div className="space-y-1.5">
+        <div className="min-w-0 space-y-1.5">
           <Label htmlFor="reproduce">2. Pasos para reproducir</Label>
           <Textarea
             id="reproduce"
             rows={4}
+            className="min-h-28 resize-y [overflow-wrap:anywhere]"
             placeholder="Ej: Abrir venta, ir a Templates, presionar Enviar para firma..."
             {...register('reproduce')}
           />
           {errors.reproduce && <p className="text-xs text-destructive">{errors.reproduce.message}</p>}
         </div>
 
-        <div className="space-y-1.5">
+        <div className="min-w-0 space-y-1.5">
           <Label htmlFor="expected">3. Resultado esperado</Label>
           <Textarea
             id="expected"
             rows={4}
+            className="min-h-28 resize-y [overflow-wrap:anywhere]"
             placeholder="Qué debería pasar si el flujo estuviera correcto."
             {...register('expected')}
           />
           {errors.expected && <p className="text-xs text-destructive">{errors.expected.message}</p>}
         </div>
 
-        <div className="space-y-1.5">
+        <div className="min-w-0 space-y-1.5">
           <Label htmlFor="actual">4. Resultado actual</Label>
           <Textarea
             id="actual"
             rows={4}
+            className="min-h-28 resize-y [overflow-wrap:anywhere]"
             placeholder="Qué pasó realmente, incluyendo mensajes de error o comportamiento observado."
             {...register('actual')}
           />
@@ -249,21 +258,22 @@ export const IncidentForm = ({ onSuccess, onCancel }: Props) => {
         </div>
       </div>
 
-      <div className="space-y-1.5">
+      <div className="min-w-0 space-y-1.5">
         <Label htmlFor="impact">5. Impacto</Label>
         <Textarea
           id="impact"
           rows={3}
+          className="min-h-24 resize-y [overflow-wrap:anywhere]"
           placeholder="Opcional: a quién afecta, si bloquea ventas, auditoría o firma, y urgencia operativa."
           {...register('impact')}
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+        <div className="min-w-0 space-y-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <Label>Capturas y archivos adjuntos</Label>
-            <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+            <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()} className="w-full sm:w-auto">
               <Paperclip className="mr-1 h-3.5 w-3.5" />
               Adjuntar
             </Button>
@@ -291,21 +301,25 @@ export const IncidentForm = ({ onSuccess, onCancel }: Props) => {
               setIsDragging(false);
               appendFiles(Array.from(event.dataTransfer.files || []));
             }}
-            className={`flex w-full flex-col items-center gap-2 rounded-2xl border-2 border-dashed px-5 py-8 text-center transition-colors ${
+            className={`flex w-full min-w-0 flex-col items-center gap-2 rounded-lg border-2 border-dashed px-3 py-6 text-center transition-colors sm:px-5 sm:py-8 ${
               isDragging
                 ? 'border-primary bg-primary/10 text-primary'
                 : 'border-border text-muted-foreground hover:border-primary/40 hover:text-primary'
             }`}
           >
             <Upload className="h-5 w-5" />
-            <span className="text-sm font-medium">Arrastra archivos o haz clic para adjuntar</span>
-            <span className="text-xs">PNG, JPG, PDF, DOC, DOCX, TXT · máximo 10MB por archivo</span>
+            <span className="max-w-full text-sm font-medium [overflow-wrap:anywhere]">
+              Arrastra archivos o haz clic para adjuntar
+            </span>
+            <span className="max-w-full text-xs [overflow-wrap:anywhere]">
+              PNG, JPG, PDF, DOC, DOCX, TXT - máximo 10MB por archivo
+            </span>
           </button>
 
           {pendingFiles.length > 0 && (
-            <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid min-w-0 gap-2 md:grid-cols-2">
               {pendingFiles.map((file, index) => (
-                <div key={`${file.name}-${index}`} className="rounded-xl border border-border/60 bg-muted/20 p-3">
+                <div key={`${file.name}-${index}`} className="min-w-0 rounded-lg border border-border/60 bg-muted/20 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
                       <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -324,22 +338,24 @@ export const IncidentForm = ({ onSuccess, onCancel }: Props) => {
           )}
         </div>
 
-        <div className="rounded-2xl border border-border/60 bg-muted/20 p-4">
+        <div className="min-w-0 rounded-lg border border-border/60 bg-muted/20 p-4">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 text-primary" />
             <h3 className="font-medium">Vista previa de la descripción</h3>
           </div>
-          <pre className="mt-3 whitespace-pre-wrap text-sm text-muted-foreground">{descriptionPreview || 'Aún no hay suficiente información.'}</pre>
+          <pre className="mt-3 max-w-full whitespace-pre-wrap break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">
+            {descriptionPreview || 'Aún no hay suficiente información.'}
+          </pre>
         </div>
       </div>
 
-      <div className="flex justify-end gap-3 pt-2">
+      <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
         {onCancel && (
-          <Button type="button" variant="outline" onClick={onCancel}>
+          <Button type="button" variant="outline" onClick={onCancel} className="w-full sm:w-auto">
             Cancelar
           </Button>
         )}
-        <Button type="submit" disabled={isLoading}>
+        <Button type="submit" disabled={isLoading} className="w-full sm:w-auto">
           {isLoading ? (uploadAttachment.isPending ? 'Subiendo adjuntos...' : 'Creando incidencia...') : 'Crear incidencia'}
         </Button>
       </div>

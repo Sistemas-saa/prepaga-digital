@@ -28,6 +28,56 @@ interface SaleGroup {
   documents: any[];
 }
 
+type NormalizedDocumentType = "contrato" | "ddjj_salud" | "anexo";
+
+const normalizeDocumentType = (document: {
+  document_type?: string | null;
+  name?: string | null;
+}): NormalizedDocumentType => {
+  const rawType = (document.document_type || "").toLowerCase();
+  const rawName = (document.name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  if (
+    rawType === "ddjj_salud" ||
+    rawType.includes("ddjj") ||
+    rawName.includes("ddjj") ||
+    rawName.includes("declaracion jurada")
+  ) {
+    return "ddjj_salud";
+  }
+
+  if (
+    rawType === "contrato" ||
+    rawType === "contract" ||
+    rawType.includes("contrato") ||
+    rawName.includes("contrato")
+  ) {
+    return "contrato";
+  }
+
+  return "anexo";
+};
+
+const getDocumentTypeLabel = (document: {
+  document_type?: string | null;
+  name?: string | null;
+}) => {
+  const normalizedType = normalizeDocumentType(document);
+
+  if (normalizedType === "ddjj_salud") {
+    return "DDJJ Salud";
+  }
+
+  if (normalizedType === "contrato") {
+    return "Contrato";
+  }
+
+  return "Anexo";
+};
+
 const Documents: React.FC = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -96,7 +146,11 @@ const Documents: React.FC = () => {
         };
       }
 
-      groups[saleId].documents.push(doc);
+      groups[saleId].documents.push({
+        ...doc,
+        normalizedDocumentType: normalizeDocumentType(doc),
+        documentTypeLabel: getDocumentTypeLabel(doc),
+      });
     }
 
     return Object.values(groups);
@@ -292,7 +346,7 @@ const Documents: React.FC = () => {
                                 <div className="min-w-0">
                                   <p className="text-sm font-medium truncate">{doc.name}</p>
                                   <p className="text-xs text-muted-foreground">
-                                    {doc.document_type} · {new Date(doc.created_at).toLocaleDateString()}
+                                    {doc.documentTypeLabel} · {new Date(doc.created_at).toLocaleDateString()}
                                   </p>
                                 </div>
                               </div>
@@ -399,7 +453,7 @@ const Documents: React.FC = () => {
               ) : selectedDocument ? (
                 <div className="space-y-3">
                   <div className="text-sm space-y-1">
-                    <p><span className="text-muted-foreground">Tipo:</span> {selectedDocument.document_type}</p>
+                    <p><span className="text-muted-foreground">Tipo:</span> {getDocumentTypeLabel(selectedDocument)}</p>
                     <p><span className="text-muted-foreground">Estado:</span> {selectedDocument.status}</p>
                     <p><span className="text-muted-foreground">Creado:</span> {new Date(selectedDocument.created_at).toLocaleString()}</p>
                   </div>
@@ -407,7 +461,7 @@ const Documents: React.FC = () => {
                     <DocumentPreview
                       content={selectedDocument.content}
                       dynamicFields={[]}
-                      templateType={selectedDocument.document_type || "document"}
+                      templateType={normalizeDocumentType(selectedDocument)}
                       templateName={selectedDocument.name || "documento"}
                     />
                   )}

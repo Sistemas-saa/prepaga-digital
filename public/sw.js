@@ -1,7 +1,7 @@
 
 // Service Worker optimizado para manejo de cache
-const CACHE_NAME = 'prepaga-digital-v5';
-const CACHE_VERSION = '5.0.0';
+const CACHE_NAME = 'prepaga-digital-v6';
+const CACHE_VERSION = '6.0.0';
 const CACHE_EXPIRY = 24 * 60 * 60 * 1000; // 24 horas
 
 const urlsToCache = [
@@ -58,7 +58,11 @@ self.addEventListener('fetch', (event) => {
   const isSameOrigin = url.origin === self.location.origin;
 
   if (!isSameOrigin) {
-    event.respondWith(fetch(event.request));
+    event.respondWith(
+      fetch(event.request).catch(() =>
+        new Response('Network error', { status: 503, headers: { 'Content-Type': 'text/plain' } })
+      )
+    );
     return;
   }
   
@@ -149,8 +153,16 @@ async function networkFirstInternal(request, options = { cachePages: true }) {
     console.error('Red no disponible, usando cache:', error);
     const cache = await caches.open(CACHE_NAME);
     const cachedResponse = await cache.match(request);
-    
-    return cachedResponse || caches.match('/offline.html');
+    if (cachedResponse) return cachedResponse;
+
+    const offlinePage = await caches.match('/offline.html');
+    if (offlinePage) return offlinePage;
+
+    // Fallback garantizado: siempre devuelve un Response válido
+    return new Response(
+      '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sin conexión</title></head><body><h1>Sin conexión</h1><p>No hay conexión disponible. Por favor recargue cuando tenga señal.</p></body></html>',
+      { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+    );
   }
 }
 

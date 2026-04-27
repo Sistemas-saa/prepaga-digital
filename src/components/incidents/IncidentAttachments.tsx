@@ -6,11 +6,17 @@ import { ImageLightbox } from '@/components/ui/image-lightbox';
 import { IncidentAttachment, useUploadAttachment } from '@/hooks/useIncidents';
 import { supabase } from '@/integrations/supabase/client';
 
-// Extract storage path from a legacy public URL or return the value as-is if already a path
+// Extract storage path from legacy storage URLs and keep raw paths untouched.
 function extractStoragePath(fileUrl: string): string {
   const marker = '/object/public/incidents/';
   const idx = fileUrl.indexOf(marker);
   if (idx !== -1) return fileUrl.slice(idx + marker.length);
+  const signedMarker = '/object/sign/incidents/';
+  const signedIdx = fileUrl.indexOf(signedMarker);
+  if (signedIdx !== -1) {
+    const signedPath = fileUrl.slice(signedIdx + signedMarker.length);
+    return signedPath.split('?')[0] || signedPath;
+  }
   return fileUrl;
 }
 
@@ -44,6 +50,9 @@ export const IncidentAttachments = ({ incidentId, attachments, canUpload = true 
     (async () => {
       const entries = await Promise.all(
         attachments.map(async (att) => {
+          if (att.file_url.startsWith('http')) {
+            return [att.id, att.file_url] as const;
+          }
           const path = extractStoragePath(att.file_url);
           const { data } = await supabase.storage
             .from('incidents')
@@ -83,7 +92,7 @@ export const IncidentAttachments = ({ incidentId, attachments, canUpload = true 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <Paperclip className="h-4 w-4 text-muted-foreground" />
           <h3 className="text-sm font-medium">Adjuntos ({attachments.length})</h3>
         </div>
@@ -129,7 +138,7 @@ export const IncidentAttachments = ({ incidentId, attachments, canUpload = true 
             setIsDragging(false);
             void handleFiles(event.dataTransfer.files);
           }}
-          className={`flex w-full flex-col items-center gap-2 rounded-2xl border-2 border-dashed px-5 py-6 text-center transition-colors ${
+          className={`flex w-full min-w-0 flex-col items-center gap-2 rounded-2xl border-2 border-dashed px-5 py-6 text-center transition-colors ${
             isDragging
               ? 'border-primary bg-primary/10 text-primary'
               : 'border-border text-muted-foreground hover:border-primary/40 hover:text-primary'
@@ -152,7 +161,7 @@ export const IncidentAttachments = ({ incidentId, attachments, canUpload = true 
             const displayUrl = signedUrls[attachment.id] ?? '';
 
             return (
-              <div key={attachment.id} className="overflow-hidden rounded-2xl border border-border/60 bg-muted/20">
+              <div key={attachment.id} className="min-w-0 overflow-hidden rounded-2xl border border-border/60 bg-muted/20">
                 {image ? (
                   <button
                     type="button"
@@ -172,14 +181,14 @@ export const IncidentAttachments = ({ incidentId, attachments, canUpload = true 
                 )}
 
                 <div className="space-y-3 p-4">
-                  <div className="flex items-start gap-2">
+                  <div className="flex min-w-0 items-start gap-2">
                     {image ? (
                       <ImageIcon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                     ) : (
                       <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                     )}
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{attachment.file_name}</p>
+                      <p className="break-words text-sm font-medium [overflow-wrap:anywhere]">{attachment.file_name}</p>
                       <p className="text-xs text-muted-foreground">{formatBytes(attachment.file_size)}</p>
                     </div>
                   </div>

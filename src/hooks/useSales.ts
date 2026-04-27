@@ -222,8 +222,8 @@ export function useSalesList(paramsOrEnabled: SalesListParams | boolean = {}) {
       } as PaginatedSalesResult;
     },
     enabled: !!user && enabled,
-    staleTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: false,
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     placeholderData: isPaginated ? (previous) => previous : undefined,
   });

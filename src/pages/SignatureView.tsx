@@ -80,38 +80,35 @@ const SignatureView = () => {
   }, [verification.otpPolicy]);
 
   const handleDownloadSignedContent = async (doc: any) => {
-    // Try to download the signed PDF from storage first
-    if (doc.signed_pdf_url) {
-      try {
-        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-        const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-        const response = await fetch(
-          `${SUPABASE_URL}/functions/v1/get-document-download-url`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': SUPABASE_PUBLISHABLE_KEY,
-              'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-              'x-signature-token': token || '',
-            },
-            body: JSON.stringify({ document_id: doc.id, kind: 'signed' }),
-          }
-        );
-        const result = await response.json();
-        if (result.url) {
-          window.open(result.url, '_blank');
-          return;
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+    const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+    // Always try get-document-download-url with kind=signed first (handles print_versions + branding)
+    try {
+      const response = await fetch(
+        `${SUPABASE_URL}/functions/v1/get-document-download-url`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_PUBLISHABLE_KEY,
+            'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+            'x-signature-token': token || '',
+          },
+          body: JSON.stringify({ document_id: doc.id, kind: 'signed' }),
         }
-      } catch (err) {
+      );
+      const result = await response.json();
+      if (result.url) {
+        window.open(result.url, '_blank');
+        return;
       }
+    } catch (err) {
     }
 
     // Try base PDF if available
     if (doc.base_pdf_url) {
       try {
-        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-        const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
         const response = await fetch(
           `${SUPABASE_URL}/functions/v1/get-document-download-url`,
           {

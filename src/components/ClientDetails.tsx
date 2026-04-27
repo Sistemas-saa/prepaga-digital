@@ -3,6 +3,7 @@ import React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { formatDateOnly } from '@/lib/dateOnly';
 
 interface ClientDetailsProps {
   clientId: string;
@@ -59,7 +60,7 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId }) => {
           {client.birth_date && (
             <div>
               <label className="text-sm font-medium text-muted-foreground">Fecha de Nacimiento</label>
-              <p className="text-sm">{new Date(client.birth_date).toLocaleDateString()}</p>
+              <p className="text-sm">{formatDateOnly(client.birth_date)}</p>
             </div>
           )}
           {client.address && (

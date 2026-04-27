@@ -79,6 +79,11 @@ const parseHealthDetail = (detail: string | null, hasPreexisting: boolean | null
   return data;
 };
 
+const logBestEffortInsertError = (tableName: string, error: any) => {
+  if (!error) return;
+  console.error(`Best-effort insert failed for ${tableName}:`, error);
+};
+
 const BeneficiaryHealthView: React.FC<{ beneficiary: any }> = ({ beneficiary }) => {
   const health = parseHealthDetail(beneficiary.preexisting_conditions_detail, beneficiary.has_preexisting_conditions);
   const hasData = beneficiary.preexisting_conditions_detail || beneficiary.has_preexisting_conditions !== null;
@@ -146,7 +151,8 @@ const BeneficiaryHealthView: React.FC<{ beneficiary: any }> = ({ beneficiary }) 
 export const AuditorDashboard: React.FC = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { profile } = useSimpleAuthContext();
+  const { profile, userRole, user } = useSimpleAuthContext();
+  const isVendedor = userRole === 'vendedor';
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [auditNotes, setAuditNotes] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -156,6 +162,7 @@ export const AuditorDashboard: React.FC = () => {
   const [lightboxName, setLightboxName] = useState('');
   const [lightboxType, setLightboxType] = useState('');
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const canViewAllAuditSales = userRole === 'auditor' || userRole === 'admin' || userRole === 'super_admin' || userRole === 'supervisor';
 
   const openAttachedDocument = async (fileUrl: string | null | undefined) => {
     if (!fileUrl) {
@@ -182,10 +189,10 @@ export const AuditorDashboard: React.FC = () => {
 
   // Fetch sales for the audit list using a lightweight projection.
   const { data: sales = [], isLoading, refetch } = useQuery({
-    queryKey: ['auditor-sales-list'],
+    queryKey: ['auditor-sales-list', user?.id, isVendedor],
     queryFn: async () => {
-      const query = supabase
-        .from('auditor_sales_view')
+      let query = supabase
+        .from('sales')
         .select(`
           id,
           client_id,
@@ -200,6 +207,10 @@ export const AuditorDashboard: React.FC = () => {
           plans:plan_id (id, name)
         `)
         .order('created_at', { ascending: false });
+
+      if (!canViewAllAuditSales && user?.id) {
+        query = query.eq('salesperson_id', user.id);
+      }
 
       const { data, error } = await query;
       if (error) throw error;
@@ -233,7 +244,7 @@ export const AuditorDashboard: React.FC = () => {
     queryKey: ['auditor-sale-detail', selectedSaleId],
     enabled: !!selectedSaleId,
     queryFn: async () => {
-      const { data: sale, error } = await supabase
+      let saleQuery = supabase
         .from('sales')
         .select(`
           id,
@@ -249,8 +260,13 @@ export const AuditorDashboard: React.FC = () => {
           clients:client_id (id, first_name, last_name, email, phone, dni, birth_date, address, barrio, city),
           plans:plan_id (id, name)
         `)
-        .eq('id', selectedSaleId)
-        .single();
+        .eq('id', selectedSaleId);
+
+      if (!canViewAllAuditSales && user?.id) {
+        saleQuery = saleQuery.eq('salesperson_id', user.id);
+      }
+
+      const { data: sale, error } = await saleQuery.single();
 
       if (error) throw error;
 
@@ -321,6 +337,30 @@ export const AuditorDashboard: React.FC = () => {
     staleTime: 10_000,
   });
 
+  const isOwnSelectedSale = !!selectedSale && !!user?.id && selectedSale.salesperson_id === user.id;
+  const canApproveSelectedSale = !!selectedSale && (canViewAllAuditSales || (isVendedor && isOwnSelectedSale));
+  const canRejectOrRequestInfoSelectedSale = !!selectedSale && canViewAllAuditSales;
+
+  const assertAuditActionAllowed = (sale: any, action: 'approve' | 'reject' | 'request_info') => {
+    if (!sale) {
+      throw new Error('No se encontró la venta seleccionada');
+    }
+
+    const isOwnSale = !!user?.id && sale.salesperson_id === user.id;
+
+    if (action === 'approve') {
+      if (canViewAllAuditSales) return;
+      if (isVendedor && isOwnSale) return;
+      throw new Error('No tienes permiso para aprobar esta venta');
+    }
+
+    if (canViewAllAuditSales) return;
+
+    if (action === 'reject' || action === 'request_info') {
+      throw new Error('Solo auditoría, admin o super admin pueden rechazar o solicitar información');
+    }
+  };
+
   // Realtime: auto-refresh when sales, sale_documents or documents change
   useEffect(() => {
     refetch();
@@ -363,6 +403,7 @@ export const AuditorDashboard: React.FC = () => {
   const approveSale = useMutation({
     mutationFn: async (saleId: string) => {
       const saleData = sales.find((s: any) => s.id === saleId);
+      assertAuditActionAllowed(saleData, 'approve');
       const previousStatus = saleData?.status || 'pendiente';
 
       // Calculate contract_start_date: first day of the approval month
@@ -383,8 +424,8 @@ export const AuditorDashboard: React.FC = () => {
 
       if (error) throw error;
 
-      // Log workflow state change
-      await supabase.from('sale_workflow_states').insert({
+      // Auxiliary audit traces are best-effort because production RLS may block direct inserts.
+      const { error: workflowError } = await supabase.from('sale_workflow_states').insert({
         sale_id: saleId,
         previous_status: previousStatus,
         new_status: 'aprobado_para_templates',
@@ -392,25 +433,27 @@ export const AuditorDashboard: React.FC = () => {
         change_reason: `Aprobado por auditor: ${auditNotes || 'Sin observaciones'}`,
         metadata: { audit_notes: auditNotes },
       });
+      logBestEffortInsertError('sale_workflow_states', workflowError);
 
-      // Log to process traces
-      await supabase.from('process_traces').insert({
+      const { error: traceError } = await supabase.from('process_traces').insert({
         sale_id: saleId,
         action: 'audit_approved',
         user_id: profile?.id,
         details: { audit_notes: auditNotes, new_status: 'aprobado_para_templates' },
       });
+      logBestEffortInsertError('process_traces', traceError);
 
       // Notify vendedor
       // saleData already declared above
       if (saleData?.salesperson_id) {
-        await supabase.from('notifications').insert({
+        const { error: notificationError } = await supabase.from('notifications').insert({
           user_id: saleData.salesperson_id,
           title: 'Venta aprobada por auditoría',
           message: `La venta #${saleData.contract_number || saleId.slice(-4)} ha sido aprobada. ${auditNotes || ''}`,
           type: 'success',
           link: `/sales/${saleId}/edit`,
         });
+        logBestEffortInsertError('notifications', notificationError);
       }
     },
     onSuccess: () => {
@@ -435,10 +478,11 @@ export const AuditorDashboard: React.FC = () => {
   // Reject sale - returns to 'rechazado' so vendedor can fix and resubmit
   const rejectSale = useMutation({
     mutationFn: async (saleId: string) => {
+      const saleData = sales.find((s: any) => s.id === saleId);
+      assertAuditActionAllowed(saleData, 'reject');
       if (!auditNotes.trim()) {
         throw new Error('Debe proporcionar un motivo de rechazo');
       }
-      const saleData = sales.find((s: any) => s.id === saleId);
       const previousStatus = saleData?.status || 'pendiente';
 
       const { error } = await supabase
@@ -454,33 +498,34 @@ export const AuditorDashboard: React.FC = () => {
 
       if (error) throw error;
 
-      // Log workflow state change
-      await supabase.from('sale_workflow_states').insert({
+      const { error: workflowError } = await supabase.from('sale_workflow_states').insert({
         sale_id: saleId,
         previous_status: previousStatus,
         new_status: 'rechazado',
         changed_by: profile?.id,
         change_reason: `Rechazado: ${auditNotes}`,
       });
+      logBestEffortInsertError('sale_workflow_states', workflowError);
 
-      // Log to process traces
-      await supabase.from('process_traces').insert({
+      const { error: traceError } = await supabase.from('process_traces').insert({
         sale_id: saleId,
         action: 'audit_rejected',
         user_id: profile?.id,
         details: { audit_notes: auditNotes, new_status: 'rechazado' },
       });
+      logBestEffortInsertError('process_traces', traceError);
 
       // Notify vendedor
       // saleData already declared above
       if (saleData?.salesperson_id) {
-        await supabase.from('notifications').insert({
+        const { error: notificationError } = await supabase.from('notifications').insert({
           user_id: saleData.salesperson_id,
           title: 'Venta rechazada por auditoría',
           message: `La venta #${saleData.contract_number || saleId.slice(-4)} fue rechazada. Motivo: ${auditNotes}`,
           type: 'error',
           link: `/sales/${saleId}/edit`,
         });
+        logBestEffortInsertError('notifications', notificationError);
       }
     },
     onSuccess: () => {
@@ -506,11 +551,11 @@ export const AuditorDashboard: React.FC = () => {
   // Request more info
   const requestMoreInfo = useMutation({
     mutationFn: async (saleId: string) => {
+      const saleData = sales.find((s: any) => s.id === saleId);
+      assertAuditActionAllowed(saleData, 'request_info');
       if (!auditNotes.trim()) {
         throw new Error('Debe especificar qué información adicional necesita');
       }
-
-      const saleData = sales.find((s: any) => s.id === saleId);
       const previousStatus = saleData?.status || 'pendiente';
 
       const { error } = await supabase
@@ -526,15 +571,15 @@ export const AuditorDashboard: React.FC = () => {
       if (error) throw error;
 
       // Create information request
-      await supabase.from('information_requests').insert({
+      const { error: infoRequestError } = await supabase.from('information_requests').insert({
         sale_id: saleId,
         request_type: 'audit',
         description: auditNotes,
         requested_by: profile?.id,
       });
+      if (infoRequestError) throw infoRequestError;
 
-      // Log workflow state change
-      await supabase.from('sale_workflow_states').insert({
+      const { error: workflowError } = await supabase.from('sale_workflow_states').insert({
         sale_id: saleId,
         previous_status: previousStatus,
         new_status: 'rechazado',
@@ -542,25 +587,27 @@ export const AuditorDashboard: React.FC = () => {
         change_reason: `Información requerida: ${auditNotes}`,
         metadata: { audit_notes: auditNotes, reason: 'requiere_info' },
       });
+      logBestEffortInsertError('sale_workflow_states', workflowError);
 
-      // Log to process traces
-      await supabase.from('process_traces').insert({
+      const { error: traceError } = await supabase.from('process_traces').insert({
         sale_id: saleId,
         action: 'audit_request_info',
         user_id: profile?.id,
         details: { audit_notes: auditNotes, new_status: 'rechazado' },
       });
+      logBestEffortInsertError('process_traces', traceError);
 
       // Notify vendedor
       // saleData already declared above
       if (saleData?.salesperson_id) {
-        await supabase.from('notifications').insert({
+        const { error: notificationError } = await supabase.from('notifications').insert({
           user_id: saleData.salesperson_id,
           title: 'Solicitud de información - Auditoría',
           message: `Se requiere información adicional para la venta #${saleData.contract_number || saleId.slice(-4)}: ${auditNotes}`,
           type: 'warning',
           link: `/sales/${saleId}/edit`,
         });
+        logBestEffortInsertError('notifications', notificationError);
       }
     },
     onSuccess: () => {
@@ -1032,7 +1079,7 @@ export const AuditorDashboard: React.FC = () => {
               <div className="flex flex-wrap gap-3">
                 <Button
                   onClick={() => approveSale.mutate(selectedSale.id)}
-                  disabled={approveSale.isPending}
+                  disabled={approveSale.isPending || !canApproveSelectedSale}
                   className="bg-green-600 hover:bg-green-700"
                 >
                   <CheckCircle className="h-4 w-4 mr-2" />
@@ -1041,7 +1088,7 @@ export const AuditorDashboard: React.FC = () => {
                 <Button
                   variant="outline"
                   onClick={() => requestMoreInfo.mutate(selectedSale.id)}
-                  disabled={requestMoreInfo.isPending || !auditNotes.trim()}
+                  disabled={requestMoreInfo.isPending || !auditNotes.trim() || !canRejectOrRequestInfoSelectedSale}
                 >
                   <AlertCircle className="h-4 w-4 mr-2" />
                   Solicitar Información
@@ -1049,12 +1096,17 @@ export const AuditorDashboard: React.FC = () => {
                 <Button
                   variant="destructive"
                   onClick={() => rejectSale.mutate(selectedSale.id)}
-                  disabled={rejectSale.isPending || !auditNotes.trim()}
+                  disabled={rejectSale.isPending || !auditNotes.trim() || !canRejectOrRequestInfoSelectedSale}
                 >
                   <XCircle className="h-4 w-4 mr-2" />
                   Rechazar
                 </Button>
               </div>
+              {isVendedor && (
+                <p className="text-sm text-muted-foreground">
+                  Como vendedor solo puedes aprobar ventas propias. Rechazar o solicitar información queda reservado para auditoría.
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>

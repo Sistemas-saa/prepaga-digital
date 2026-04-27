@@ -1,8 +1,33 @@
 let listenersInstalled = false;
 let refreshQueued = false;
 let periodicUpdateHandle: number | null = null;
+let versionCheckHandle: number | null = null;
 
 const SW_UPDATE_INTERVAL_MS = 15 * 60 * 1000;
+const VERSION_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 min
+let currentBuildVersion: string | null = null;
+
+async function checkBuildVersion() {
+  try {
+    const res = await fetch(`/build-version.json?t=${Date.now()}`, {
+      cache: 'no-store',
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const remoteVersion: string = data.version;
+    if (!currentBuildVersion) {
+      currentBuildVersion = remoteVersion;
+      return;
+    }
+    if (remoteVersion !== currentBuildVersion && !refreshQueued) {
+      refreshQueued = true;
+      console.info('[SW] Nueva versión detectada, recargando...');
+      window.location.reload();
+    }
+  } catch {
+    // Sin conexión — ignorar
+  }
+}
 
 const requestPeriodicUpdate = (registration: ServiceWorkerRegistration) => {
   registration.update().catch(() => null);
@@ -47,6 +72,12 @@ const installRegistrationHandlers = (registration: ServiceWorkerRegistration) =>
     periodicUpdateHandle = window.setInterval(() => {
       requestPeriodicUpdate(registration);
     }, SW_UPDATE_INTERVAL_MS);
+  }
+
+  // Verificación periódica de nueva versión de build
+  if (versionCheckHandle === null && typeof window !== 'undefined') {
+    checkBuildVersion();
+    versionCheckHandle = window.setInterval(checkBuildVersion, VERSION_CHECK_INTERVAL_MS);
   }
 };
 

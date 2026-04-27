@@ -10,6 +10,7 @@ import { ClientForm } from "@/components/ClientForm";
 import { useClients, useDeleteClient } from "@/hooks/useClients";
 import { Database } from "@/integrations/supabase/types";
 import { useSimpleAuthContext } from "@/components/SimpleAuthProvider";
+import { formatDateOnly } from "@/lib/dateOnly";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,11 +47,6 @@ export function ClientsList() {
   const handleCloseForm = () => {
     setShowClientForm(false);
     setEditingClient(null);
-  };
-
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString('es-PY');
   };
 
   const filteredClients = useMemo(() => {
@@ -191,7 +187,7 @@ export function ClientsList() {
                   }
                   </TableCell>
                   <TableCell>{client.dni || '-'}</TableCell>
-                  <TableCell>{formatDate(client.birth_date)}</TableCell>
+                  <TableCell>{formatDateOnly(client.birth_date, 'es-PY')}</TableCell>
                   <TableCell>
                     <div className="flex space-x-2">
                       <Button

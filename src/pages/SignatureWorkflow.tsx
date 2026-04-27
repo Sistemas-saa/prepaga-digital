@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { ArrowLeft, FileText, Users, Send, Copy, Check, MessageCircle, Download, RefreshCw, Eye, Clock, CheckCircle, Info, Monitor, Smartphone, Tablet, Globe, Building, ShieldCheck } from 'lucide-react';
 import { useSalesList } from '@/hooks/useSales';
 import { useSignatureLinks, useResendSignatureLink } from '@/hooks/useSignatureLinks';
@@ -25,6 +27,29 @@ const formatDateTimePY = (dateStr: string) => {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
+};
+
+type PhoneVerificationAction = 'send_whatsapp' | 'resend';
+
+interface SignatureWorkflowLink {
+  id: string;
+  sale_id: string;
+  token: string;
+  recipient_type: string;
+  recipient_id: string | null;
+  recipient_email: string | null;
+  recipient_phone: string | null;
+}
+
+interface PhoneVerificationState {
+  action: PhoneVerificationAction;
+  link: SignatureWorkflowLink;
+  recipientName: string;
+  phone: string;
+}
+
+const normalizePhoneForSending = (phone: string | null | undefined) => {
+  return (phone || '').replace(/[^0-9]/g, '');
 };
 
 const SignatureWorkflow = () => {
@@ -116,6 +141,8 @@ const SignatureWorkflow = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [detailLink, setDetailLink] = useState<any>(null);
   const [regeneratingLinkId, setRegeneratingLinkId] = useState<string | null>(null);
+  const [phoneVerification, setPhoneVerification] = useState<PhoneVerificationState | null>(null);
+  const [isConfirmingPhone, setIsConfirmingPhone] = useState(false);
 
   const selectedSaleCompanyId = selectedSale?.company_id;
 
@@ -128,7 +155,7 @@ const SignatureWorkflow = () => {
         .from('company_settings')
         .select('contratada_signature_mode, contratada_signer_name, contratada_signer_email, contratada_signer_dni, contratada_signer_phone')
         .eq('company_id', selectedSaleCompanyId)
-        .single();
+        .maybeSingle();
       if (error) return null;
       return data;
     },
@@ -152,7 +179,7 @@ const SignatureWorkflow = () => {
 
   const handleSendWhatsApp = async (phone: string | null, linkToken: string, recipientName: string) => {
     const url = getSignatureUrl(linkToken);
-    const cleanPhone = (phone || '').replace(/[^0-9]/g, '');
+    const cleanPhone = normalizePhoneForSending(phone);
 
     if (!cleanPhone) {
       toast.error('No hay número de teléfono disponible');
@@ -219,15 +246,42 @@ const SignatureWorkflow = () => {
     }
   };
 
-  const handleResendLink = (link: any) => {
-    resendLink.mutate({
-      id: link.id,
-      sale_id: link.sale_id,
-      recipient_type: link.recipient_type,
-      recipient_id: link.recipient_id,
-      recipient_email: link.recipient_email || '',
-      recipient_phone: link.recipient_phone,
+  const openPhoneVerification = (link: SignatureWorkflowLink, action: PhoneVerificationAction) => {
+    setPhoneVerification({
+      action,
+      link,
+      recipientName: getRecipientName(link),
+      phone: getRecipientPhone(link) || '',
     });
+  };
+
+  const confirmPhoneAndContinue = async () => {
+    if (!phoneVerification) return;
+
+    const cleanPhone = normalizePhoneForSending(phoneVerification.phone);
+    if (!cleanPhone) {
+      toast.error('Ingrese un número de teléfono válido antes de enviar');
+      return;
+    }
+
+    setIsConfirmingPhone(true);
+    try {
+      if (phoneVerification.action === 'send_whatsapp') {
+        await handleSendWhatsApp(cleanPhone, phoneVerification.link.token, phoneVerification.recipientName);
+      } else {
+        await resendLink.mutateAsync({
+          id: phoneVerification.link.id,
+          sale_id: phoneVerification.link.sale_id,
+          recipient_type: phoneVerification.link.recipient_type,
+          recipient_id: phoneVerification.link.recipient_id,
+          recipient_email: phoneVerification.link.recipient_email || '',
+          recipient_phone: cleanPhone,
+        });
+      }
+      setPhoneVerification(null);
+    } finally {
+      setIsConfirmingPhone(false);
+    }
   };
 
   const handleDownloadContent = (doc: any) => {
@@ -608,8 +662,6 @@ const SignatureWorkflow = () => {
           const isExpired = !isCompleted && new Date(link.expires_at) < new Date();
           const isRevoked = link.status === 'revocado';
           const isActive = !isCompleted && !isExpired && !isRevoked;
-          const phone = getRecipientPhone(link);
-          const name = getRecipientName(link);
 
           return (
             <div key={link.id} className="border rounded-lg p-4 space-y-3">
@@ -688,7 +740,7 @@ const SignatureWorkflow = () => {
                   <Button
                     size="sm"
                     className="bg-green-600 hover:bg-green-700 text-white"
-                    onClick={() => handleSendWhatsApp(phone, link.token, name)}
+                    onClick={() => openPhoneVerification(link, 'send_whatsapp')}
                   >
                     <MessageCircle className="h-4 w-4 mr-1" />
                     Enviar por WhatsApp
@@ -696,7 +748,7 @@ const SignatureWorkflow = () => {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleResendLink(link)}
+                    onClick={() => openPhoneVerification(link, 'resend')}
                     disabled={resendLink.isPending}
                   >
                     <RefreshCw className={`h-4 w-4 mr-1 ${resendLink.isPending ? 'animate-spin' : ''}`} />
@@ -719,7 +771,7 @@ const SignatureWorkflow = () => {
                   <Button
                     size="sm"
                     variant="default"
-                    onClick={() => handleResendLink(link)}
+                    onClick={() => openPhoneVerification(link, 'resend')}
                     disabled={resendLink.isPending}
                   >
                     <RefreshCw className={`h-4 w-4 mr-1 ${resendLink.isPending ? 'animate-spin' : ''}`} />
@@ -762,7 +814,7 @@ const SignatureWorkflow = () => {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleResendLink(link)}
+                    onClick={() => openPhoneVerification(link, 'resend')}
                     disabled={resendLink.isPending}
                   >
                     <RefreshCw className={`h-4 w-4 mr-1 ${resendLink.isPending ? 'animate-spin' : ''}`} />
@@ -1122,6 +1174,64 @@ const SignatureWorkflow = () => {
                   </div>
                 );
               })()}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!phoneVerification} onOpenChange={(open) => !open && setPhoneVerification(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Verificar número de envío</DialogTitle>
+            <DialogDescription>
+              Confirme o corrija el número antes de enviar el enlace de firma por WhatsApp.
+            </DialogDescription>
+          </DialogHeader>
+
+          {phoneVerification && (
+            <div className="space-y-4">
+              <div className="rounded-lg border p-3 text-sm">
+                <p className="text-muted-foreground">Destinatario</p>
+                <p className="font-medium">{phoneVerification.recipientName}</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="signature-recipient-phone">Número de WhatsApp</Label>
+                <Input
+                  id="signature-recipient-phone"
+                  value={phoneVerification.phone}
+                  onChange={(event) => {
+                    const value = event.target.value.replace(/[^\d+()\-\s]/g, '');
+                    setPhoneVerification((current) => current ? { ...current, phone: value } : current);
+                  }}
+                  placeholder="Ej: 0981234567 o 595981234567"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Se usará este número para este envío. Si reenvías, el nuevo enlace quedará con este número.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setPhoneVerification(null)}
+                  disabled={isConfirmingPhone}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={confirmPhoneAndContinue}
+                  disabled={isConfirmingPhone || !normalizePhoneForSending(phoneVerification.phone)}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  <MessageCircle className="h-4 w-4 mr-2" />
+                  {isConfirmingPhone
+                    ? 'Enviando...'
+                    : phoneVerification.action === 'resend'
+                      ? 'Confirmar y reenviar'
+                      : 'Confirmar y enviar'}
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>

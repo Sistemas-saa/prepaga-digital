@@ -245,8 +245,7 @@ const SaleTabbedForm: React.FC<SaleTabbedFormProps> = ({ sale }) => {
                     client_id: formData.client_id,
                     plan_id: formData.plan_id,
                     company_id: formData.company_id,
-                    total_amount: formData.total_amount,
-                    titular_amount: formData.total_amount,
+                    titular_amount: formData.titular_amount,
                     notes: formData.notes,
                     requires_adherents: formData.requires_adherents,
                     status: 'pendiente' as any,
@@ -255,20 +254,38 @@ const SaleTabbedForm: React.FC<SaleTabbedFormProps> = ({ sale }) => {
                     billing_email: formData.billing_email || null,
                     billing_phone: formData.billing_phone || null,
                   } as any);
-                  // Log workflow state
-                  await supabase.from('sale_workflow_states').insert({
+                  // Recalculate total_amount = titular_amount + sum(adherentes) after save
+                  const { data: adherentesAudit } = await supabase
+                    .from('beneficiaries')
+                    .select('amount, is_primary')
+                    .eq('sale_id', sale.id);
+                  const adherentesSumAudit = (adherentesAudit || [])
+                    .filter((b: any) => !b.is_primary)
+                    .reduce((sum: number, b: any) => sum + (Number(b.amount) || 0), 0);
+                  await supabase
+                    .from('sales')
+                    .update({ total_amount: formData.titular_amount + adherentesSumAudit })
+                    .eq('id', sale.id);
+                  // Auxiliary workflow tracking is best-effort because production RLS may block direct inserts.
+                  const { error: workflowError } = await supabase.from('sale_workflow_states').insert({
                     sale_id: sale.id,
                     previous_status: currentStatus,
                     new_status: 'pendiente',
                     changed_by: profile?.id,
                     change_reason: currentStatus === 'rechazado' ? 'Reenviado a auditoría tras correcciones' : 'Enviado a auditoría por el vendedor',
                   });
-                  await supabase.from('process_traces').insert({
+                  if (workflowError) {
+                    console.error('Best-effort insert failed for sale_workflow_states:', workflowError);
+                  }
+                  const { error: traceError } = await supabase.from('process_traces').insert({
                     sale_id: sale.id,
                     action: 'status_change',
                     user_id: profile?.id,
                     details: { previous_status: currentStatus, new_status: 'pendiente', reason: currentStatus === 'rechazado' ? 'Reenviado tras correcciones' : 'Enviado a auditoría' },
                   });
+                  if (traceError) {
+                    console.error('Best-effort insert failed for process_traces:', traceError);
+                  }
 
                   if (profile?.company_id) {
                     const { data: companyProfiles, error: profilesError } = await supabase
@@ -321,7 +338,7 @@ const SaleTabbedForm: React.FC<SaleTabbedFormProps> = ({ sale }) => {
                           .insert(recipientRows as any);
 
                         if (notificationError) {
-                          console.error('Error creating audit notifications:', notificationError);
+                          console.error('Best-effort insert failed for notifications:', notificationError);
                         }
                       }
                     }

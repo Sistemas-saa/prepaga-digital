@@ -360,7 +360,7 @@ export const useSubmitSignatureLink = () => {
                 const fd = `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
                 contratadaBlock = `
                   <div data-signer="contratada" style="display:inline-block;vertical-align:top;width:48%;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#111;">
-                    <p style="margin:0 0 2px 0;font-size:11px;">Firmado electrónicamente por: <strong>${signerName.toLowerCase()}</strong></p>
+                    <p style="margin:0 0 2px 0;font-size:11px;">Firmado electrónicamente por: <strong>${signerName}</strong></p>
                     <p style="margin:0 0 12px 0;font-size:11px;">Fecha: ${fd}</p>
                     <div style="border-top:1px solid #555;width:80%;margin:0 0 6px 0;"></div>
                     <p style="margin:0;font-size:11px;font-weight:bold;">CONTRATADA</p>
@@ -643,7 +643,7 @@ export const useSubmitSignatureLink = () => {
                 const signerAttrV2 = recipientType === 'contratada' ? 'contratada' : recipientType === 'adherente' ? 'adherente' : 'titular';
                 electronicBlock = `
                   <div data-signer="${signerAttrV2}" style="display:inline-block;vertical-align:top;width:48%;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#111;">
-                    <p style="margin:0 0 2px 0;font-size:11px;">Firmado electrónicamente por: <strong>${signerName.toLowerCase()}</strong></p>
+                    <p style="margin:0 0 2px 0;font-size:11px;">Firmado electrónicamente por: <strong>${signerName}</strong></p>
                     <p style="margin:0 0 12px 0;font-size:11px;">Fecha: ${formattedDate}</p>
                     <div style="border-top:1px solid #555;width:80%;margin:0 0 6px 0;"></div>
                     <p style="margin:0;font-size:11px;font-weight:bold;">${roleLabel}</p>

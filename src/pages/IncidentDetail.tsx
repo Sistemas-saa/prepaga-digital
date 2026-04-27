@@ -245,13 +245,13 @@ export default function IncidentDetail() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-6">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div className="flex items-start gap-3">
+      <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
           <Button variant="ghost" size="icon" onClick={() => navigate('/incidents')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
 
-          <div className="space-y-3">
+          <div className="min-w-0 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <IncidentStatusBadge status={incident.status} />
               <IncidentPriorityBadge priority={incident.priority} />
@@ -260,9 +260,11 @@ export default function IncidentDetail() {
                 {incident.module}
               </span>
             </div>
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight">{incident.title}</h1>
-              <p className="mt-1 text-sm text-muted-foreground">
+            <div className="min-w-0">
+              <h1 className="break-words text-3xl font-semibold tracking-tight [overflow-wrap:anywhere]">
+                {incident.title}
+              </h1>
+              <p className="mt-1 break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">
                 ID {incident.id.slice(0, 8)} · Reportó {reporter} · Responsable {assignee}
               </p>
             </div>
@@ -270,10 +272,12 @@ export default function IncidentDetail() {
         </div>
 
         {incident.status !== 'resuelto' && (
-          <div className="min-w-80 rounded-2xl border border-primary/20 bg-primary/10 p-4">
+          <div className="w-full min-w-0 rounded-2xl border border-primary/20 bg-primary/10 p-4 xl:w-[320px] xl:min-w-80">
             <p className="text-xs uppercase tracking-[0.2em] text-primary">Próximo paso</p>
             <h2 className="mt-2 text-lg font-semibold">{nextAction?.title}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{nextAction?.description}</p>
+            <p className="mt-1 break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">
+              {nextAction?.description}
+            </p>
           </div>
         )}
       </div>
@@ -306,14 +310,14 @@ export default function IncidentDetail() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_360px]">
-        <div className="space-y-6">
+      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.7fr)_360px]">
+        <div className="min-w-0 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Resumen del problema</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="whitespace-pre-wrap text-sm text-foreground">
+              <p className="whitespace-pre-wrap break-words text-sm text-foreground [overflow-wrap:anywhere]">
                 {descriptionSections.summary || incident.description}
               </p>
 
@@ -380,7 +384,7 @@ export default function IncidentDetail() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <p className="whitespace-pre-wrap text-sm">{incident.analysis_notes}</p>
+                <p className="whitespace-pre-wrap break-words text-sm [overflow-wrap:anywhere]">{incident.analysis_notes}</p>
                 {incident.estimated_hours && (
                   <p className="text-sm text-muted-foreground">
                     Tiempo estimado: <strong className="text-foreground">{incident.estimated_hours}h</strong>
@@ -465,7 +469,7 @@ export default function IncidentDetail() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {incident.resolution_notes && (
-                  <p className="rounded-xl border border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">
+                  <p className="rounded-xl border border-border/60 bg-muted/30 p-4 whitespace-pre-wrap break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">
                     {incident.resolution_notes}
                   </p>
                 )}
@@ -505,7 +509,7 @@ export default function IncidentDetail() {
                 <CardTitle className="text-base text-green-700 dark:text-green-400">Resolución confirmada</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="whitespace-pre-wrap text-sm">{incident.resolution_notes}</p>
+                <p className="whitespace-pre-wrap break-words text-sm [overflow-wrap:anywhere]">{incident.resolution_notes}</p>
               </CardContent>
             </Card>
           )}
@@ -527,7 +531,7 @@ export default function IncidentDetail() {
           </Card>
         </div>
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           {incident.status !== 'resuelto' && (canManage || isReporter) && (
             <Card>
               <CardHeader>
@@ -555,7 +559,7 @@ export default function IncidentDetail() {
                   </Button>
                 )}
 
-                <p className="rounded-xl border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">
+                <p className="rounded-xl border border-border/60 bg-muted/30 p-3 break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">
                   {nextAction?.description}
                 </p>
               </CardContent>
@@ -612,9 +616,11 @@ const InfoBlock = ({
   content?: string;
   fallback: string;
 }) => (
-  <div className="rounded-2xl border border-border/60 bg-muted/20 p-4">
+  <div className="min-w-0 rounded-2xl border border-border/60 bg-muted/20 p-4">
     <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{title}</p>
-    <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">{content || fallback}</p>
+    <p className="mt-2 whitespace-pre-wrap break-words text-sm text-foreground [overflow-wrap:anywhere]">
+      {content || fallback}
+    </p>
   </div>
 );
 
@@ -627,11 +633,11 @@ const DetailLine = ({
   value: string;
   icon?: ReactNode;
 }) => (
-  <div>
+  <div className="min-w-0">
     <p className="mb-1 text-xs text-muted-foreground">{label}</p>
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       {icon}
-      <span>{value}</span>
+      <span className="break-words [overflow-wrap:anywhere]">{value}</span>
     </div>
   </div>
 );
@@ -656,7 +662,7 @@ const StatusActionCard = ({
       <CardTitle className="text-base text-sky-700 dark:text-sky-400">{title}</CardTitle>
     </CardHeader>
     <CardContent className="space-y-4">
-      <p className="text-sm text-muted-foreground">{description}</p>
+      <p className="break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">{description}</p>
       {onAction ? (
         <Button className="w-full bg-sky-600 text-white hover:bg-sky-700" onClick={onAction}>
           {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : actionIcon}

@@ -166,7 +166,8 @@ export interface EnhancedTemplateContext {
  */
 function calculateAge(birthDate: string | null): number {
   if (!birthDate) return 0;
-  const birth = new Date(birthDate);
+  // Force local time — same fix as formatDate
+  const birth = new Date(birthDate.includes('T') ? birthDate : `${birthDate}T00:00:00`);
   const today = new Date();
   let age = today.getFullYear() - birth.getFullYear();
   const m = today.getMonth() - birth.getMonth();
@@ -197,7 +198,11 @@ function formatCurrency(amount: number, currencySymbol = '$'): string {
 function formatDate(date: string | Date | null, formatStr = 'dd/MM/yyyy'): string {
   if (!date) return '';
   try {
-    const d = typeof date === 'string' ? new Date(date) : date;
+    // For date-only strings (YYYY-MM-DD), appending T00:00:00 forces local time.
+    // Without this, new Date('2015-06-08') is UTC midnight → Paraguay (UTC-4) shows June 7.
+    const d = typeof date === 'string'
+      ? new Date(date.includes('T') ? date : `${date}T00:00:00`)
+      : date;
     return format(d, formatStr, { locale: es });
   } catch {
     return '';

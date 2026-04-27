@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useSimpleAuthContext } from '@/components/SimpleAuthProvider';
 import { supabase } from '@/integrations/supabase/client';
+import type { Database } from '@/integrations/supabase/types';
 import { generateUUID } from '@/lib/utils';
 
 export type IncidentStatus =
@@ -16,6 +17,8 @@ export type IncidentStatus =
 
 export type IncidentPriority = 'baja' | 'media' | 'alta' | 'critica';
 export type IncidentScope = 'all' | 'mine' | 'reported' | 'unassigned' | 'approval';
+type IncidentInsert = Database['public']['Tables']['incidents']['Insert'];
+type IncidentUpdate = Database['public']['Tables']['incidents']['Update'];
 
 export interface IncidentActor {
   id: string;
@@ -448,7 +451,7 @@ export const useIncident = (id: string) => {
 
 export const useCreateIncident = () => {
   const queryClient = useQueryClient();
-  const { user } = useSimpleAuthContext();
+  const { user, profile } = useSimpleAuthContext();
 
   return useMutation({
     mutationFn: async (data: {
@@ -458,17 +461,23 @@ export const useCreateIncident = () => {
       priority: IncidentPriority;
       company_id?: string;
     }) => {
-      const payload = {
+      const companyId = data.company_id || profile?.company_id;
+      if (!user?.id || !companyId) {
+        throw new Error('No se pudo identificar tu usuario o empresa. Vuelve a iniciar sesión.');
+      }
+
+      const payload: IncidentInsert = {
         ...data,
+        company_id: companyId,
         title: data.title.trim(),
         description: data.description.trim(),
-        reported_by: user?.id,
+        reported_by: user.id,
         status: 'nuevo' as IncidentStatus,
       };
 
       const { data: incident, error } = await supabase
         .from('incidents')
-        .insert(payload as any)
+        .insert(payload)
         .select()
         .single();
 
@@ -498,7 +507,7 @@ export const useUpdateIncident = () => {
 
       const { data, error } = await supabase
         .from('incidents')
-        .update(updates as any)
+        .update(updates as IncidentUpdate)
         .eq('id', id)
         .select()
         .single();

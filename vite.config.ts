@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import fs from "fs";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -10,6 +11,35 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     react(),
+    // Inyecta versión de build en sw.js y genera build-version.json
+    {
+      name: 'sw-version-inject',
+      apply: 'build' as const,
+      writeBundle() {
+        const buildVersion = Date.now().toString(36);
+        const buildAt = new Date().toISOString();
+
+        // Reemplaza CACHE_NAME en dist/sw.js con la versión real del build
+        const swPath = path.resolve(__dirname, 'dist/sw.js');
+        if (fs.existsSync(swPath)) {
+          const content = fs.readFileSync(swPath, 'utf-8');
+          const updated = content.replace(
+            /CACHE_NAME\s*=\s*['"][^'"]+['"]/,
+            `CACHE_NAME = 'prepaga-digital-${buildVersion}'`
+          ).replace(
+            /CACHE_VERSION\s*=\s*['"][^'"]+['"]/,
+            `CACHE_VERSION = '${buildVersion}'`
+          );
+          fs.writeFileSync(swPath, updated);
+        }
+
+        // Genera build-version.json para que el cliente detecte updates
+        fs.writeFileSync(
+          path.resolve(__dirname, 'dist/build-version.json'),
+          JSON.stringify({ version: buildVersion, buildAt }, null, 2)
+        );
+      },
+    },
   ].filter(Boolean),
   resolve: {
     alias: {
