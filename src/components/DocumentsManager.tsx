@@ -45,8 +45,9 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ saleId }) =>
     queryFn: async () => {
       const { data, error } = await supabase
         .from('documents')
-        .select('id, name, document_type, created_at, file_url, content, is_final, signed_pdf_url')
+        .select('id, name, document_type, created_at, file_url, content, is_final, signed_pdf_url, status, beneficiary_id')
         .eq('sale_id', saleId)
+        .neq('document_type', 'firma')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -172,7 +173,7 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ saleId }) =>
     printWindow.document.close();
   };
 
-  const handleDownload = async (document: { id: string; file_url: string | null; name: string; content?: string | null; signed_pdf_url?: string | null }) => {
+  const handleDownload = async (document: { id: string; file_url: string | null; name: string; content?: string | null; signed_pdf_url?: string | null; document_type?: string | null }) => {
     // Tier 1: signed PDF via edge function
     if (document.signed_pdf_url) {
       try {
@@ -201,9 +202,21 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ saleId }) =>
       }
     }
 
-    // Tier 3: HTML content
-    if (document.content) {
+    // Tier 3: HTML content (skip firma docs — su content es JSON, no HTML)
+    if (document.content && document.document_type !== 'firma') {
       openHtmlContentWindow(document.content, document.name);
+      return;
+    }
+
+    // Firma electrónica: mostrar info
+    if (document.document_type === 'firma' && document.content) {
+      try {
+        const sig = JSON.parse(document.content);
+        const fecha = sig.accepted_at ? new Date(sig.accepted_at).toLocaleString('es-PY') : 'Sin fecha';
+        toast({ title: 'Firma electrónica registrada', description: `Aceptada el ${fecha}` });
+      } catch {
+        toast({ title: 'Firma electrónica', description: 'Registro de firma sin datos adicionales.' });
+      }
       return;
     }
 
@@ -285,29 +298,45 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ saleId }) =>
                 <TableRow key={document.id}>
                   <TableCell>{document.name}</TableCell>
                   <TableCell>{document.document_type}</TableCell>
-                  <TableCell>
-                    {new Date(document.created_at).toLocaleDateString()}
-                  </TableCell>
+                  <TableCell>{new Date(document.created_at).toLocaleDateString()}</TableCell>
                   <TableCell>
                     <div className="flex space-x-2">
-                      <Button variant="outline" size="sm" onClick={() => {
-                        if (!document.file_url && document.content) {
-                          openHtmlContentWindow(document.content, document.name);
-                        } else {
-                          setPreviewDocument(document);
+                      <Button variant="outline" size="sm" onClick={async () => {
+                        // Prioridad 1: PDF firmado en Storage
+                        if (document.signed_pdf_url) {
+                          const [bucket, ...rest] = document.signed_pdf_url.split(':');
+                          const path = rest.join(':');
+                          const { data } = await supabase.storage.from(bucket).createSignedUrl(path, 3600);
+                          if (data?.signedUrl) {
+                            window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+                            return;
+                          }
                         }
+                        // Prioridad 2: archivo en Storage (anexos, etc.)
+                        if (document.file_url) {
+                          const { data } = await supabase.storage.from('documents').createSignedUrl(document.file_url, 3600);
+                          if (data?.signedUrl) {
+                            window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+                            return;
+                          }
+                        }
+                        // Prioridad 3: contenido HTML
+                        if (document.content) {
+                          const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"/><title>${document.name}</title><style>body{font-family:Arial,sans-serif;max-width:820px;margin:40px auto;padding:0 24px;font-size:13px;line-height:1.6;color:#111}h1,h2,h3{margin:16px 0 8px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #ccc;padding:7px 10px}img{max-width:100%}</style></head><body>${document.content}</body></html>`;
+                          const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+                          const url = URL.createObjectURL(blob);
+                          window.open(url, '_blank');
+                          setTimeout(() => URL.revokeObjectURL(url), 60000);
+                          return;
+                        }
+                        toast({ title: 'Sin contenido', description: 'Este documento no tiene contenido disponible.', variant: 'destructive' });
                       }}>
                         <Eye className="h-4 w-4" />
                       </Button>
                       <Button variant="outline" size="sm" onClick={() => handleDownload(document)}>
                         <Download className="h-4 w-4" />
                       </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => handleDelete(document.id)}
-                        disabled={isDeleting}
-                      >
+                      <Button variant="destructive" size="sm" onClick={() => handleDelete(document.id)} disabled={isDeleting}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>

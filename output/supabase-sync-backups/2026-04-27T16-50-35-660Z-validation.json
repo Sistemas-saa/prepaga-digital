@@ -1,0 +1,38 @@
+{
+  "mismatches": [
+    {
+      "table": "audit_comments",
+      "source": 1,
+      "dest": 0
+    },
+    {
+      "table": "template_responses",
+      "source": 364,
+      "dest": 0
+    },
+    {
+      "table": "user_roles",
+      "source": 14,
+      "dest": 23
+    },
+    {
+      "table": "whatsapp_notifications",
+      "source": 10,
+      "dest": 0
+    }
+  ],
+  "integrity": [
+    {
+      "check_name": "profiles_without_auth_users",
+      "failures": 0
+    },
+    {
+      "check_name": "user_roles_without_profiles",
+      "failures": 0
+    },
+    {
+      "check_name": "document_paths_missing_storage",
+      "failures": 0
+    }
+  ]
+}
