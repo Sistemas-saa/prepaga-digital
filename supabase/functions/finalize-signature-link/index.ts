@@ -1,6 +1,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getSignatureLinkUrl } from "../_shared/public-app-url.ts"
+
+// --- Inlined: _shared/public-app-url.ts ---
+function getPublicAppUrl(): string {
+  const configured = (Deno.env.get("PUBLIC_APP_URL") || "").trim();
+  return (configured || "https://prepaga.saa.com.py").replace(/\/+$/, "");
+}
+function getSignatureLinkUrl(token: string): string {
+  return `${getPublicAppUrl()}/firmar/${token}`;
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -135,13 +143,21 @@ async function triggerPadesSigning(
   let signedCount = 0
   const signedDocIds: string[] = []
 
-  // Get documents for this sale
-  const { data: docs } = await supabase
+  // Get documents for this sale.
+  // For adherentes: also fetch their DDJJ even if is_final is null (it gets set during signing).
+  let docsQuery = supabase
     .from('documents')
     .select('id, document_type, beneficiary_id, base_pdf_url, signed_pdf_url, is_final, content, name, sale_id')
     .eq('sale_id', link.sale_id)
-    .eq('is_final', true)
     .neq('document_type', 'firma')
+
+  if (link.recipient_type === 'adherente' && link.recipient_id) {
+    docsQuery = docsQuery.or(`is_final.eq.true,and(document_type.eq.ddjj_salud,beneficiary_id.eq.${link.recipient_id})`)
+  } else {
+    docsQuery = docsQuery.eq('is_final', true)
+  }
+
+  const { data: docs } = await docsQuery
 
   if (!docs || docs.length === 0) return { count: 0, docIds: [] }
 
@@ -174,6 +190,10 @@ async function triggerPadesSigning(
     // DDJJ: adherente only signs their own
     if (isDDJJ && link.recipient_type === 'adherente' && link.recipient_id) {
       if (doc.beneficiary_id !== link.recipient_id) continue
+      // Mark as final if not yet set (adherente DDJJs start with is_final=null)
+      if (!doc.is_final) {
+        await supabase.from('documents').update({ is_final: true, status: 'firmado', signed_at: new Date().toISOString() }).eq('id', doc.id)
+      }
     }
 
     // Step 1: Generate base PDF if not exists
