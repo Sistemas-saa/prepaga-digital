@@ -1,0 +1,42 @@
+name: Sync from DaltonP93
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Sincroniza cada 30 minutos
+  workflow_dispatch:        # Permite ejecución manual desde GitHub
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout destino
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          fetch-depth: 0    # Importante: trae todo el historial
+          
+      - name: Configurar git
+        run: |
+          git config --global user.name "Auto Sync Bot"
+          git config --global user.email "sync@automation.com"
+          
+      - name: Agregar repositorio origen
+        run: git remote add upstream https://github.com/DaltonP93/prepaga-digital.git
+        
+      - name: Fetch cambios del origen
+        run: git fetch upstream
+        
+      - name: Obtener nombre de rama principal
+        id: get_branch
+        run: |
+          MAIN_BRANCH=$(git remote show upstream | grep 'HEAD branch' | cut -d' ' -f5)
+          echo "main_branch=$MAIN_BRANCH" >> $GITHUB_OUTPUT
+          
+      - name: Merge cambios
+        run: |
+          git checkout ${{ steps.get_branch.outputs.main_branch }}
+          git merge upstream/${{ steps.get_branch.outputs.main_branch }} --allow-unrelated-histories --no-edit
+          
+      - name: Push cambios al destino
+        run: git push origin ${{ steps.get_branch.outputs.main_branch }}
