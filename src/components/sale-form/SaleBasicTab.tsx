@@ -28,6 +28,7 @@ interface SaleBasicTabProps {
     billing_ruc: string;
     billing_email: string;
     billing_phone: string;
+    contract_start_date: string;
     immediate_coverage: boolean;
     sale_type: string;
   };
@@ -322,6 +323,14 @@ const SaleBasicTab: React.FC<SaleBasicTabProps> = ({ formData, onChange, company
               value={formData.billing_phone || ''}
               onChange={(e) => onChange('billing_phone', e.target.value)}
               placeholder="Número de celular"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>Fecha de inicio de contrato</Label>
+            <Input
+              type="date"
+              value={formData.contract_start_date || ''}
+              onChange={(e) => onChange('contract_start_date', e.target.value)}
             />
           </div>
         </div>

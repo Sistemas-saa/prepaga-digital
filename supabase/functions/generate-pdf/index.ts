@@ -227,6 +227,13 @@ serve(async (req) => {
             totalFormateado: `$${(sale.total_amount || 0).toLocaleString()}`,
             numeroContrato: sale.contract_number || '',
             estado: sale.status || '',
+            fechaInicioContrato: formatDateLocal(sale.contract_start_date || null),
+          },
+          facturacion: {
+            razonSocial: sale.billing_razon_social || '',
+            ruc: sale.billing_ruc || '',
+            email: sale.billing_email || '',
+            telefono: sale.billing_phone || '',
           },
           fecha: {
             actual: new Date().toLocaleDateString('es-ES'),
@@ -303,7 +310,16 @@ function interpolateTemplateVariables(template: string, data: any): string {
   replaceNested(data.plan, 'plan')
   replaceNested(data.empresa, 'empresa')
   replaceNested(data.venta, 'venta')
+  replaceNested(data.facturacion, 'facturacion')
   replaceNested(data.fecha, 'fecha')
+
+  const legacyAliases: Record<string, string> = {
+    '{{fecha_inicio_contrato}}': data.venta?.fechaInicioContrato || '',
+  }
+  Object.entries(legacyAliases).forEach(([placeholder, value]) => {
+    const regex = new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+    result = result.replace(regex, escapeHtml(value))
+  })
 
   return result
 }

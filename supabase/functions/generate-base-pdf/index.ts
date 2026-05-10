@@ -249,6 +249,23 @@ function isMissingPrintVersionsTable(error: { code?: string; message?: string } 
   );
 }
 
+function formatDatePy(dateValue: string | null | undefined): string {
+  if (!dateValue) return "";
+  const date = new Date(dateValue.includes("T") ? dateValue : `${dateValue}T00:00:00`);
+  return date.toLocaleDateString("es-PY");
+}
+
+function ensureContractStartDateInBilling(html: string, contractStartDate: string | null | undefined): string {
+  if (!html || !contractStartDate) return html;
+  if (html.includes("Fecha de inicio de contrato")) return html;
+  if (!html.includes("DATOS DE FACTURACIÓN")) return html;
+
+  return html.replace(
+    "<h3>DATOS DE FACTURACIÓN</h3>",
+    `<h3>DATOS DE FACTURACIÓN</h3><p>Fecha de inicio de contrato: <strong>${formatDatePy(contractStartDate)}</strong></p>`
+  );
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -321,7 +338,7 @@ Deno.serve(async (req) => {
 
     const { data: sale } = await supabaseAdmin
       .from("sales")
-      .select("company_id")
+      .select("company_id, contract_start_date")
       .eq("id", doc.sale_id)
       .single();
 
@@ -370,7 +387,8 @@ Deno.serve(async (req) => {
 
     // 2c. Resolve expired image URLs in document content
     const bucket = Deno.env.get("STORAGE_BUCKET") || "documents";
-    const resolvedContent = await resolveContentImages(doc.content, supabaseAdmin, bucket);
+    const contentWithContractStart = ensureContractStartDateInBilling(doc.content, sale?.contract_start_date);
+    const resolvedContent = await resolveContentImages(contentWithContractStart, supabaseAdmin, bucket);
 
     // 3. Build wrapped HTML and Puppeteer header/footer templates
     const wrappedHtml = buildWrappedHtml(resolvedContent, branding, doc.name || "Documento");

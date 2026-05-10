@@ -311,11 +311,17 @@ function resolvePlaceholders(text: string, data: Record<string, string>): string
 
 function flattenSaleData(sale: any): Record<string, string> {
   const result: Record<string, string> = {};
+  const formatDateLocal = (dateValue: string | null | undefined) => {
+    if (!dateValue) return "";
+    return new Date(dateValue.includes("T") ? dateValue : `${dateValue}T00:00:00`).toLocaleDateString("es-AR");
+  };
 
   // Sale fields
   if (sale) {
     result["contract_number"] = sale.contract_number || "";
     result["sale_date"] = sale.created_at ? new Date(sale.created_at).toLocaleDateString("es-AR") : "";
+    result["contract_start_date"] = formatDateLocal(sale.contract_start_date);
+    result["fecha_inicio_contrato"] = result["contract_start_date"];
     result["status"] = sale.status || "";
     result["total_amount"] = sale.total_amount?.toString() || "";
   }

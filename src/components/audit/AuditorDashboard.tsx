@@ -202,6 +202,7 @@ export const AuditorDashboard: React.FC = () => {
           audit_status,
           total_amount,
           contract_number,
+          contract_start_date,
           created_at,
           clients:client_id (id, first_name, last_name),
           plans:plan_id (id, name)
@@ -255,6 +256,7 @@ export const AuditorDashboard: React.FC = () => {
           audit_status,
           total_amount,
           contract_number,
+          contract_start_date,
           immediate_coverage,
           sale_type,
           clients:client_id (id, first_name, last_name, email, phone, dni, birth_date, address, barrio, city),
@@ -406,20 +408,33 @@ export const AuditorDashboard: React.FC = () => {
       assertAuditActionAllowed(saleData, 'approve');
       const previousStatus = saleData?.status || 'pendiente';
 
-      // Calculate contract_start_date: first day of the approval month
-      const now = new Date();
-      const contractStartDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      const existingContractStartDate = typeof saleData?.contract_start_date === 'string'
+        ? saleData.contract_start_date.trim()
+        : saleData?.contract_start_date;
+      const updatePayload: {
+        audit_status: string;
+        auditor_id: string | undefined;
+        audited_at: string;
+        audit_notes: string;
+        status: 'aprobado_para_templates';
+        contract_start_date?: string;
+      } = {
+        audit_status: 'aprobado',
+        auditor_id: profile?.id,
+        audited_at: new Date().toISOString(),
+        audit_notes: auditNotes || 'Aprobado sin observaciones',
+        status: 'aprobado_para_templates',
+      };
+
+      if (!existingContractStartDate) {
+        // Fallback: first day of the approval month when the sale has no contract start date.
+        const now = new Date();
+        updatePayload.contract_start_date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      }
 
       const { error } = await supabase
         .from('sales')
-        .update({
-          audit_status: 'aprobado',
-          auditor_id: profile?.id,
-          audited_at: new Date().toISOString(),
-          audit_notes: auditNotes || 'Aprobado sin observaciones',
-          status: 'aprobado_para_templates' as any,
-          contract_start_date: contractStartDate,
-        } as any)
+        .update(updatePayload as any)
         .eq('id', saleId);
 
       if (error) throw error;
