@@ -198,6 +198,14 @@ serve(async (req) => {
           if (!d) return ''
           return new Date(d.includes('T') ? d : d + 'T00:00:00').toLocaleDateString('es-ES')
         }
+        const formatDateLongLocal = (d: string | null) => {
+          if (!d) return ''
+          return new Date(d.includes('T') ? d : d + 'T00:00:00').toLocaleDateString('es-PY', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+          })
+        }
 
         processedContent = interpolateTemplateVariables(processedContent, {
           cliente: {
@@ -227,7 +235,7 @@ serve(async (req) => {
             totalFormateado: `$${(sale.total_amount || 0).toLocaleString()}`,
             numeroContrato: sale.contract_number || '',
             estado: sale.status || '',
-            fechaInicioContrato: formatDateLocal(sale.contract_start_date || null),
+            fechaInicioContrato: formatDateLongLocal(sale.contract_start_date || null),
           },
           facturacion: {
             razonSocial: sale.billing_razon_social || '',

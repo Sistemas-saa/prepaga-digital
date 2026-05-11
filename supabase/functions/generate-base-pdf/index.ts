@@ -26,17 +26,16 @@ interface BrandingInfo {
  * These render natively on every PDF page — no CSS tricks needed.
  */
 function buildPuppeteerTemplates(branding: BrandingInfo): { headerTemplate: string; footerTemplate: string } {
-  // Use only the dedicated PDF header/footer images from company_settings.
-  // No fallback to the company logo — if not configured, show empty space.
-  const imgStyle = "display:block;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;object-position:center;";
-
+  // Puppeteer header/footer templates require EXPLICIT dimensions (height:100% resolves to 0
+  // because the parent has no explicit height in Puppeteer's rendering context).
+  // font-size must also be explicit (default is 0).
   const headerTemplate = branding.headerImageUrl
-    ? `<div style="width:100%;height:100%;padding:2mm 15mm;display:flex;align-items:center;justify-content:center;"><img src="${branding.headerImageUrl}" style="${imgStyle}" /></div>`
-    : `<div style="width:100%;height:100%;"></div>`;
+    ? `<div style="font-size:10px;width:100%;height:24mm;padding:0 15mm;margin:0;text-align:center;"><img src="${branding.headerImageUrl}" style="display:inline-block;max-width:100%;max-height:24mm;width:auto;height:auto;object-fit:contain;" /></div>`
+    : `<div style="font-size:10px;width:100%;height:24mm;"></div>`;
 
   const footerTemplate = branding.footerImageUrl
-    ? `<div style="width:100%;height:100%;padding:1mm 15mm;display:flex;align-items:center;justify-content:center;"><img src="${branding.footerImageUrl}" style="${imgStyle}" /></div>`
-    : `<div style="width:100%;height:100%;"></div>`;
+    ? `<div style="font-size:10px;width:100%;height:18mm;padding:0 15mm;margin:0;text-align:center;"><img src="${branding.footerImageUrl}" style="display:inline-block;max-width:100%;max-height:18mm;width:auto;height:auto;object-fit:contain;" /></div>`
+    : `<div style="font-size:10px;width:100%;height:18mm;"></div>`;
 
   return { headerTemplate, footerTemplate };
 }
@@ -255,15 +254,33 @@ function formatDatePy(dateValue: string | null | undefined): string {
   return date.toLocaleDateString("es-PY");
 }
 
-function ensureContractStartDateInBilling(html: string, contractStartDate: string | null | undefined): string {
-  if (!html || !contractStartDate) return html;
-  if (html.includes("Fecha de inicio de contrato")) return html;
-  if (!html.includes("DATOS DE FACTURACIÓN")) return html;
+function formatDateLongPy(dateValue: string | null | undefined): string {
+  if (!dateValue) return "";
+  const date = new Date(dateValue.includes("T") ? dateValue : `${dateValue}T00:00:00`);
+  return date.toLocaleDateString("es-PY", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
 
-  return html.replace(
-    "<h3>DATOS DE FACTURACIÓN</h3>",
-    `<h3>DATOS DE FACTURACIÓN</h3><p>Fecha de inicio de contrato: <strong>${formatDatePy(contractStartDate)}</strong></p>`
-  );
+function ensureContractStartDateInBilling(html: string, contractStartDate: string | null | undefined): string {
+  if (!html) return html;
+  const formattedDate = contractStartDate ? formatDateLongPy(contractStartDate) : "";
+
+  // 1. Reemplazar placeholder literal {{fecha_inicio_contrato}} (con o sin espacios)
+  let result = html.replace(/\{\{\s*fecha_inicio_contrato\s*\}\}/gi, formattedDate);
+
+  // 2. Si el contenido NO menciona "Fecha de inicio de contrato" pero tiene "DATOS DE FACTURACIÓN",
+  //    inyectarla después del título (solo si hay fecha disponible)
+  if (formattedDate && !result.includes("Fecha de inicio de contrato") && result.includes("DATOS DE FACTURACIÓN")) {
+    result = result.replace(
+      "<h3>DATOS DE FACTURACIÓN</h3>",
+      `<h3>DATOS DE FACTURACIÓN</h3><p>Fecha de inicio de contrato: <strong>${formattedDate}</strong></p>`
+    );
+  }
+
+  return result;
 }
 
 Deno.serve(async (req) => {
