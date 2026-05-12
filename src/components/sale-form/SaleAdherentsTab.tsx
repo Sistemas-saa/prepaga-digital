@@ -21,6 +21,7 @@ type BeneficiaryFormData = {
   dni: string;
   relationship: string;
   birth_date: string;
+  gender: string;
   phone: string;
   email: string;
   address: string;
@@ -31,7 +32,7 @@ type BeneficiaryFormData = {
 
 const emptyForm: BeneficiaryFormData = {
   first_name: '', last_name: '', dni: '', relationship: '', birth_date: '',
-  phone: '', email: '', address: '', barrio: '', city: '', amount: 0,
+  gender: '', phone: '', email: '', address: '', barrio: '', city: '', amount: 0,
 };
 
 const formatAmountInput = (value: number) => {
@@ -101,6 +102,16 @@ const BeneficiaryForm: React.FC<BeneficiaryFormProps> = ({ data, onChange, onSav
         <div className="space-y-2">
           <Label>Fecha de Nacimiento</Label>
           <Input type="date" value={data.birth_date} onChange={(e) => onChange({ ...data, birth_date: e.target.value })} />
+        </div>
+        <div className="space-y-2">
+          <Label>Género</Label>
+          <Select value={data.gender} onValueChange={(v) => onChange({ ...data, gender: v })}>
+            <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="masculino">Masculino</SelectItem>
+              <SelectItem value="femenino">Femenino</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="space-y-2">
           <Label>Teléfono *</Label>
@@ -176,6 +187,7 @@ const SaleAdherentsTab: React.FC<SaleAdherentsTabProps> = ({ saleId, disabled })
       dni: b.dni || '',
       relationship: b.relationship || '',
       birth_date: b.birth_date || '',
+      gender: b.gender || '',
       phone: b.phone || '',
       email: b.email || '',
       address: b.address || '',

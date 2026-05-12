@@ -34,9 +34,10 @@ interface SaleBasicTabProps {
   };
   onChange: (field: string, value: any) => void;
   companyId?: string;
+  errors?: Record<string, string>;
 }
 
-const SaleBasicTab: React.FC<SaleBasicTabProps> = ({ formData, onChange, companyId }) => {
+const SaleBasicTab: React.FC<SaleBasicTabProps> = ({ formData, onChange, companyId, errors }) => {
   const { data: clients } = useClients();
   const { data: plans } = usePlans();
   const { settings } = useCurrencySettings();
@@ -214,13 +215,23 @@ const SaleBasicTab: React.FC<SaleBasicTabProps> = ({ formData, onChange, company
 
       {/* Total Amount */}
       <div className="space-y-2">
-        <Label>Monto Titular / Plan (Gs.) *</Label>
+        <Label htmlFor="titular_amount">Monto Titular / Plan (Gs.) *</Label>
         <Input
+          id="titular_amount"
           inputMode="decimal"
           value={formatAmountInput(Number(formData.titular_amount) || 0)}
           onChange={(e) => onChange('titular_amount', parseAmountInput(e.target.value))}
           placeholder="0"
+          aria-invalid={(Number(formData.titular_amount) || 0) <= 0 || !!errors?.basico}
+          className={
+            (Number(formData.titular_amount) || 0) <= 0
+              ? 'border-red-500 focus-visible:ring-red-500'
+              : ''
+          }
         />
+        {(Number(formData.titular_amount) || 0) <= 0 && (
+          <p className="text-sm text-red-500">El monto debe ser mayor a 0</p>
+        )}
       </div>
 
       {/* Signer Selection */}

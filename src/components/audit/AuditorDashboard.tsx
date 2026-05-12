@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useSimpleAuthContext } from '@/components/SimpleAuthProvider';
 import { formatCurrency } from '@/lib/utils';
+import { formatDateOnly } from '@/lib/dateOnly';
 import { getDocumentAccessUrl } from '@/lib/assetUrlHelper';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -804,7 +805,7 @@ export const AuditorDashboard: React.FC = () => {
               {selectedSale.clients?.birth_date && (
                 <div>
                   <span className="font-medium">Fecha Nac.: </span>
-                  {new Date(selectedSale.clients.birth_date).toLocaleDateString('es-PY')}
+                  {formatDateOnly(selectedSale.clients.birth_date)}
                 </div>
               )}
               {selectedSale.clients?.address && (
@@ -903,7 +904,7 @@ export const AuditorDashboard: React.FC = () => {
                             </div>
                             <div className="text-sm text-muted-foreground">
                               {ben.relationship} • C.I.: {ben.dni || 'No especificado'}
-                              {ben.birth_date && ` • Nac: ${new Date(ben.birth_date).toLocaleDateString('es-PY')}`}
+                              {ben.birth_date && ` • Nac: ${formatDateOnly(ben.birth_date)}`}
                               {ben.email && ` • ${ben.email}`}
                               {ben.phone && ` • Tel: ${ben.phone}`}
                             </div>

@@ -110,6 +110,9 @@ const SaleTabbedForm: React.FC<SaleTabbedFormProps> = ({ sale }) => {
   const validateBasicTab = (): string | null => {
     if (!formData.client_id) return 'Debe seleccionar un cliente';
     if (!formData.plan_id) return 'Debe seleccionar un plan';
+    if (!formData.titular_amount || Number(formData.titular_amount) <= 0) {
+      return 'El Monto Titular / Plan debe ser mayor a 0';
+    }
     return null;
   };
 
@@ -132,8 +135,11 @@ const SaleTabbedForm: React.FC<SaleTabbedFormProps> = ({ sale }) => {
   };
 
   const handleSave = async () => {
-    if (!formData.client_id || !formData.plan_id) {
-      toast.error('Cliente y Plan son obligatorios');
+    const validationError = validateBasicTab();
+    if (validationError) {
+      setTabErrors({ basico: validationError });
+      setActiveTab('basico');
+      toast.error(validationError);
       return;
     }
 
@@ -453,6 +459,7 @@ const SaleTabbedForm: React.FC<SaleTabbedFormProps> = ({ sale }) => {
                     formData={formData}
                     onChange={handleChange}
                     companyId={profile?.company_id || undefined}
+                    errors={tabErrors}
                   />
                 </fieldset>
               </TabsContent>

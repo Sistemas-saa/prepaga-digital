@@ -8,7 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, FileText, Users, Send, Copy, Check, MessageCircle, Download, RefreshCw, Eye, Clock, CheckCircle, Info, Monitor, Smartphone, Tablet, Globe, Building, ShieldCheck } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ArrowLeft, FileText, Users, Send, Copy, Check, MessageCircle, Download, RefreshCw, Eye, Clock, CheckCircle, Info, Monitor, Smartphone, Tablet, Globe, Building, ShieldCheck, Search, Filter, X } from 'lucide-react';
 import { useSalesList } from '@/hooks/useSales';
 import { useSignatureLinks, useResendSignatureLink } from '@/hooks/useSignatureLinks';
 import { useBeneficiaries } from '@/hooks/useBeneficiaries';
@@ -140,6 +141,9 @@ const SignatureWorkflow = () => {
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [detailLink, setDetailLink] = useState<any>(null);
+  // Filtros para el listado de "Flujo de Firmas" (cuando no hay saleId seleccionado)
+  const [listSearchTerm, setListSearchTerm] = useState('');
+  const [listStatusFilter, setListStatusFilter] = useState<string>('todos');
   const [regeneratingLinkId, setRegeneratingLinkId] = useState<string | null>(null);
   const [phoneVerification, setPhoneVerification] = useState<PhoneVerificationState | null>(null);
   const [isConfirmingPhone, setIsConfirmingPhone] = useState(false);
@@ -570,11 +574,37 @@ const SignatureWorkflow = () => {
     const isSeller = effectiveRole === 'vendedor';
     const canViewAllSales = permissions.sales.viewAll;
 
-    const availableSales = sales.filter(sale =>
+    const baseAvailableSales = sales.filter(sale =>
       ['enviado', 'firmado', 'completado'].includes(sale.status) ||
       (isSeller && sale.salesperson_id === profile?.id) ||
       canViewAllSales
     );
+
+    const normalizedSearch = listSearchTerm.trim().toLowerCase();
+    const availableSales = baseAvailableSales.filter((sale) => {
+      // Filtro por estado
+      if (listStatusFilter !== 'todos' && sale.status !== listStatusFilter) return false;
+
+      // Búsqueda libre: contract_number, cliente (nombre/apellido/email), plan
+      if (normalizedSearch) {
+        const clientName = sale.clients
+          ? `${sale.clients.first_name || ''} ${sale.clients.last_name || ''}`.trim().toLowerCase()
+          : '';
+        const clientEmail = (sale.clients?.email || '').toLowerCase();
+        const contractNum = (sale.contract_number || '').toLowerCase();
+        const planName = (sale.plans?.name || '').toLowerCase();
+        const haystack = `${clientName} ${clientEmail} ${contractNum} ${planName}`;
+        if (!haystack.includes(normalizedSearch)) return false;
+      }
+
+      return true;
+    });
+
+    const hasActiveFilters = normalizedSearch !== '' || listStatusFilter !== 'todos';
+    const clearFilters = () => {
+      setListSearchTerm('');
+      setListStatusFilter('todos');
+    };
 
     return (
       <div className="container mx-auto py-6">
@@ -588,13 +618,63 @@ const SignatureWorkflow = () => {
             Volver a Ventas
           </Button>
         </div>
+
+        {/* Filtros */}
+        <Card className="mb-4">
+          <CardContent className="pt-6">
+            <div className="flex flex-col md:flex-row gap-3 md:items-center">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por contrato, cliente, email o plan…"
+                  value={listSearchTerm}
+                  onChange={(e) => setListSearchTerm(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <div className="w-full md:w-56">
+                <Select value={listStatusFilter} onValueChange={setListStatusFilter}>
+                  <SelectTrigger>
+                    <div className="flex items-center gap-2">
+                      <Filter className="h-4 w-4 text-muted-foreground" />
+                      <SelectValue placeholder="Estado" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos los estados</SelectItem>
+                    <SelectItem value="enviado">Enviado</SelectItem>
+                    <SelectItem value="firmado">Firmado</SelectItem>
+                    <SelectItem value="completado">Completado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" onClick={clearFilters}>
+                  <X className="h-4 w-4 mr-1" /> Limpiar
+                </Button>
+              )}
+            </div>
+            <div className="text-sm text-muted-foreground mt-3">
+              Mostrando <span className="font-medium text-foreground">{availableSales.length}</span> de {baseAvailableSales.length} venta{baseAvailableSales.length === 1 ? '' : 's'}
+            </div>
+          </CardContent>
+        </Card>
+
         <div className="grid gap-4">
           {availableSales.length === 0 ? (
             <Card>
               <CardContent className="text-center py-8">
                 <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-muted-foreground mb-4">No hay ventas disponibles para firma</p>
-                <Button onClick={() => navigate('/sales')}>Ir a Ventas</Button>
+                <p className="text-muted-foreground mb-4">
+                  {hasActiveFilters
+                    ? 'No se encontraron ventas con los filtros aplicados'
+                    : 'No hay ventas disponibles para firma'}
+                </p>
+                {hasActiveFilters ? (
+                  <Button variant="outline" onClick={clearFilters}>Limpiar filtros</Button>
+                ) : (
+                  <Button onClick={() => navigate('/sales')}>Ir a Ventas</Button>
+                )}
               </CardContent>
             </Card>
           ) : (

@@ -16,6 +16,9 @@ export interface TemplateContext {
     dni?: string;
     direccion?: string;
     fecha_nacimiento?: string;
+    gender?: string;
+    genero?: string;
+    sexo?: string;
   };
   plan: {
     nombre: string;
@@ -58,6 +61,9 @@ export const createTemplateContext = (
       dni: client?.dni || '',
       direccion: client?.address || '',
       fecha_nacimiento: client?.birth_date || '',
+      gender: (client as any)?.gender || '',
+      genero: (client as any)?.gender || '',
+      sexo: (client as any)?.gender || '',
     },
     plan: {
       nombre: plan?.name || '',

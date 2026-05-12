@@ -245,10 +245,10 @@ const SaleForm = () => {
                   id="total_amount"
                   type="number"
                   step="1"
-                  {...register('total_amount', { 
+                  {...register('total_amount', {
                     required: 'El monto es requerido',
                     valueAsNumber: true,
-                    min: { value: 0, message: 'El monto debe ser mayor a 0' }
+                    min: { value: 1, message: 'El monto debe ser mayor a 0' }
                   })}
                   placeholder="0"
                 />

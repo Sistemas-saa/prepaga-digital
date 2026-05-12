@@ -10,6 +10,7 @@ import { useBeneficiaries, useCreateBeneficiary, useUpdateBeneficiary, useDelete
 import { BeneficiaryForm, BeneficiaryFormData } from '@/components/beneficiaries/BeneficiaryForm';
 import { BeneficiaryDocuments } from '@/components/beneficiaries/BeneficiaryDocuments';
 import { useCurrencySettings } from '@/hooks/useCurrencySettings';
+import { formatDateOnly } from '@/lib/dateOnly';
 
 interface BeneficiariesManagerProps {
   saleId: string;
@@ -223,9 +224,7 @@ export const BeneficiariesManager: React.FC<BeneficiariesManagerProps> = ({ sale
                         <div>
                           <span className="text-muted-foreground">Fecha Nacimiento:</span>
                           <p className="font-medium">
-                            {beneficiary.birth_date 
-                              ? new Date(beneficiary.birth_date).toLocaleDateString() 
-                              : '-'}
+                            {formatDateOnly(beneficiary.birth_date)}
                           </p>
                         </div>
                         <div>

@@ -28,12 +28,17 @@ async function recalculateSaleTotalAmount(saleId: string) {
   if (hasPrimary) {
     // If a primary beneficiary exists, use ALL beneficiary amounts (primary + adherentes)
     const totalAmount = (beneficiaries || []).reduce((sum: number, b: any) => sum + (b.amount || 0), 0);
-    // Also sync titular_amount with primary beneficiary's amount
-    const primaryAmount = (beneficiaries || []).find((b: any) => b.is_primary)?.amount || 0;
-    await supabase.from('sales').update({
-      titular_amount: primaryAmount,
+    // Sync titular_amount with primary beneficiary's amount — but only if > 0.
+    // If primary has amount=0 (común al crearlo y olvidar el monto), NO pisar titular_amount
+    // (preserva el valor existente cargado en SaleBasicTab o desde el plan).
+    const primaryAmount = Number((beneficiaries || []).find((b: any) => b.is_primary)?.amount || 0);
+    const updatePayload: { titular_amount?: number; total_amount: number } = {
       total_amount: totalAmount,
-    }).eq('id', saleId);
+    };
+    if (primaryAmount > 0) {
+      updatePayload.titular_amount = primaryAmount;
+    }
+    await supabase.from('sales').update(updatePayload).eq('id', saleId);
   } else {
     // No primary: use titular_amount as base + sum of adherentes
     const titularBase = Number((sale as any)?.titular_amount || 0);

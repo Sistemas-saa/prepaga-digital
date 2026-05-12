@@ -69,6 +69,8 @@ export interface BeneficiaryContext {
   barrio: string;
   codigoPostal: string;
   genero: string;
+  gender: string;
+  sexo: string;
   estadoCivil: string;
   ocupacion: string;
   tienePreexistencias: boolean;
@@ -96,6 +98,9 @@ export interface EnhancedTemplateContext {
     codigoPostal: string;
     fechaNacimiento: string;
     edad: number;
+    genero: string;
+    gender: string;
+    sexo: string;
   };
   plan: {
     nombre: string;
@@ -258,6 +263,9 @@ function createBeneficiaryContext(beneficiary: any): BeneficiaryContext {
     barrio: beneficiary.barrio || '',
     codigoPostal: beneficiary.postal_code || '',
     genero: beneficiary.gender || '',
+    // Alias en inglés para compatibilidad con templates que usan {{gender}} o {{sexo}}
+    gender: beneficiary.gender || '',
+    sexo: beneficiary.gender || '',
     estadoCivil: beneficiary.marital_status || '',
     ocupacion: beneficiary.occupation || '',
     tienePreexistencias: beneficiary.has_preexisting_conditions || false,
@@ -361,6 +369,9 @@ export function createEnhancedTemplateContext(
       codigoPostal: client?.postal_code || '',
       fechaNacimiento: formatDate(client?.birth_date),
       edad: calculateAge(client?.birth_date),
+      genero: (client as any)?.gender || '',
+      gender: (client as any)?.gender || '',
+      sexo: (client as any)?.gender || '',
     },
     plan: {
       nombre: plan?.name || '',
