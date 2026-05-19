@@ -139,7 +139,7 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
       if (!sale?.client_id) return null;
       const { data: client } = await supabase
         .from('clients')
-        .select('first_name, last_name, dni, birth_date, phone, email, address, city, province, postal_code')
+        .select('first_name, last_name, dni, birth_date, gender, marital_status, phone, email, address, city, province, postal_code')
         .eq('id', sale.client_id)
         .single();
       return client ? { ...client, clientId: sale.client_id } : null;
@@ -291,6 +291,8 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
             last_name: saleClient.last_name,
             dni: saleClient.dni,
             birth_date: saleClient.birth_date,
+            gender: (saleClient as any).gender ?? null,
+            marital_status: (saleClient as any).marital_status ?? null,
             phone: saleClient.phone,
             email: saleClient.email,
             address: saleClient.address,
