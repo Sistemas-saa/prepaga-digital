@@ -270,7 +270,11 @@ export const useResendSignatureLink = () => {
       recipient_id: string | null;
       recipient_email: string;
       recipient_phone: string | null;
+      recipient_name?: string | null;
+      step_order?: number | null;
     }) => {
+      const isContratada = oldLink.recipient_type === 'contratada';
+
       // 1. Revoke old link
       await supabase
         .from('signature_links')
@@ -282,7 +286,11 @@ export const useResendSignatureLink = () => {
 
       // 2. Reset document statuses for this recipient instead of deleting them
       // This preserves the generated documents so they don't need to be regenerated
-      if (oldLink.recipient_type === 'adherente' && oldLink.recipient_id) {
+      if (isContratada) {
+        // Para contratada: NO tocar los documentos. El bloque `else` de abajo resetea
+        // los documentos del TITULAR (is_final=false, borra los 'firma'), lo que al
+        // regenerar el link de la contratada invalidaba firmas ya válidas del titular.
+      } else if (oldLink.recipient_type === 'adherente' && oldLink.recipient_id) {
         // For adherente: reset status of documents tied to this beneficiary
         await supabase
           .from('documents')
@@ -310,7 +318,7 @@ export const useResendSignatureLink = () => {
       // 3. Create new link with same recipient data
       const token = generateUUID();
       const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 1);
+      expiresAt.setDate(expiresAt.getDate() + (isContratada ? 3 : 1));
 
       const { data, error } = await supabase
         .from('signature_links')
@@ -321,6 +329,10 @@ export const useResendSignatureLink = () => {
           recipient_email: oldLink.recipient_email || '',
           recipient_phone: oldLink.recipient_phone || null,
           recipient_id: oldLink.recipient_id || null,
+          recipient_name: oldLink.recipient_name ?? null,
+          // step_order DEBE heredarse: la columna tiene DEFAULT 1 y omitirlo hacía que un
+          // link de contratada regenerado naciera como step 1 -> bucle de links fantasma.
+          step_order: oldLink.step_order ?? (isContratada ? 2 : 1),
           expires_at: expiresAt.toISOString(),
           status: 'pendiente',
         })

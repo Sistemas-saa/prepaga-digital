@@ -40,6 +40,8 @@ interface SignatureWorkflowLink {
   recipient_id: string | null;
   recipient_email: string | null;
   recipient_phone: string | null;
+  recipient_name?: string | null;
+  step_order?: number | null;
 }
 
 interface PhoneVerificationState {
@@ -309,6 +311,8 @@ const SignatureWorkflow = () => {
           recipient_id: phoneVerification.link.recipient_id,
           recipient_email: phoneVerification.link.recipient_email || '',
           recipient_phone: cleanPhone,
+          recipient_name: phoneVerification.link.recipient_name ?? null,
+          step_order: phoneVerification.link.step_order ?? null,
         });
       }
       setPhoneVerification(null);
@@ -601,15 +605,28 @@ const SignatureWorkflow = () => {
   };
 
   // Get the most recent active link for each recipient (skip revoked old ones)
+  const linkPriority = (link: any) => {
+    if (link.status === 'completado') return 0;  // una firma real siempre gana
+    if (link.status === 'revocado') return 2;    // los revocados sólo si no hay nada más
+    return 1;                                     // pendiente / expirado
+  };
+
   const getActiveLinks = (links: any[]) => {
     const byRecipient = new Map<string, any>();
     for (const link of links) {
       const key = link.recipient_type === 'titular' ? 'titular'
         : link.recipient_type === 'contratada' ? 'contratada'
         : `adherente-${link.recipient_id}`;
-      if (!byRecipient.has(key)) {
+      const current = byRecipient.get(key);
+      if (!current) {
         byRecipient.set(key, link);
+        continue;
       }
+      const cmp = linkPriority(link) - linkPriority(current);
+      // Mismo estado → gana el más reciente por created_at (desempate estable)
+      const isBetter = cmp < 0 || (cmp === 0
+        && new Date(link.created_at).getTime() > new Date(current.created_at).getTime());
+      if (isBetter) byRecipient.set(key, link);
     }
     return Array.from(byRecipient.values());
   };
