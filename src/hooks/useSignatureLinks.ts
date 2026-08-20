@@ -292,19 +292,29 @@ export const useResendSignatureLink = () => {
         // regenerar el link de la contratada invalidaba firmas ya válidas del titular.
       } else if (oldLink.recipient_type === 'adherente' && oldLink.recipient_id) {
         // For adherente: reset status of documents tied to this beneficiary
+        // Mismas guardas que la rama del titular: nunca resetear un documento ya finalizado
+        // ni uno con PDF sellado por PAdES (perderia la evidencia de una firma real).
         await supabase
           .from('documents')
           .update({ status: 'pendiente' as any, signature_data: null, signed_at: null, signed_by: null, is_final: false })
           .eq('sale_id', oldLink.sale_id)
-          .eq('beneficiary_id', oldLink.recipient_id);
+          .eq('beneficiary_id', oldLink.recipient_id)
+          .is('signed_pdf_url', null)
+          .or('is_final.is.null,is_final.eq.false');
       } else {
         // For titular: reset status of generated documents without beneficiary_id
+        // `.or('is_final.is.null,is_final.eq.false')`: NUNCA tocar documentos ya finalizados/
+        // firmados. Resetear is_final=false en un contrato final hacía que el flujo de la
+        // contratada no lo encontrara y terminara borrándolo, perdiendo la firma del titular.
+        // OJO: NO usar `.neq('is_final', true)` — en SQL `NULL <> true` es NULL, así que ese
+        // filtro dejaba afuera los documentos creados con `is_final: null` (existen en prod).
         await supabase
           .from('documents')
           .update({ status: 'pendiente' as any, signature_data: null, signed_at: null, signed_by: null, is_final: false })
           .eq('sale_id', oldLink.sale_id)
           .is('beneficiary_id', null)
-          .eq('generated_from_template', true);
+          .eq('generated_from_template', true)
+          .or('is_final.is.null,is_final.eq.false');
 
         // Also reset standalone firma documents
         await supabase

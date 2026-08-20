@@ -104,6 +104,54 @@ const insertDocumentsWithFallback = async (documents: Record<string, any>[]) => 
   }
 };
 
+/**
+ * Borra los documentos generados desde plantilla que todavía NO están finalizados,
+ * para que regenerar/reenviar sea idempotente. NUNCA borra documentos con is_final = true
+ * (esos ya tienen firma y/o PDF sellado).
+ *
+ * Filtros de seguridad (defensa en profundidad) aplicados a TODOS los deletes:
+ *  - generated_from_template = true  → solo documentos que este flujo puede recrear
+ *  - status <> 'firmado'             → nunca borra un documento ya firmado
+ *  - document_type <> 'firma'        → nunca borra los documentos de firma
+ *  - signed_pdf_url IS NULL          → nunca borra un documento con PDF sellado (PAdES)
+ *  - signature_data IS NULL          → nunca borra un documento con datos de firma
+ *  - signed_at IS NULL               → nunca borra un documento con fecha de firma
+ *
+ * ⚠️ Las guardas `signature_data` / `signed_at` NO son redundantes: son load-bearing.
+ * Cierran la ventana de carrera del sellado PAdES. `finalize-signature-link` sella las
+ * DDJJ de adherente aunque tengan is_final false/null, y `pades-sign-document` recién al
+ * final setea `signed_pdf_url` y `status = 'firmado'`. Entre que el adherente firma y que
+ * PAdES termina, el documento queda is_final=false / status='pendiente' /
+ * signed_pdf_url=null → sin estas dos guardas sería borrable y se perdería evidencia de
+ * una firma REAL. No quitarlas.
+ */
+const deleteUnsignedGeneratedDocuments = async (saleId: string) => {
+  const baseDelete = () =>
+    supabase
+      .from('documents')
+      .delete()
+      .eq('sale_id', saleId)
+      .eq('generated_from_template', true)
+      .neq('status', 'firmado' as any)
+      // Endurecimiento respecto del código original: los documentos de tipo 'firma'
+      // y los que ya tienen PDF sellado quedan siempre fuera del borrado.
+      .neq('document_type', 'firma')
+      .is('signed_pdf_url', null)
+      // Load-bearing (ver comentario del bloque de arriba): cierran la ventana en la que
+      // un documento ya firmado todavía no fue sellado por PAdES.
+      .is('signature_data', null)
+      .is('signed_at', null);
+
+  // 1) Documentos generados que todavía no están finalizados.
+  const notFinalResult = await baseDelete().is('is_final', false);
+
+  // 2) Anexos: se insertan con is_final = true por diseño, así que el filtro anterior
+  //    no los alcanza. Siguen protegidos por status / signed_pdf_url.
+  const annexResult = await baseDelete().eq('document_type', 'anexo');
+
+  return { notFinalResult, annexResult };
+};
+
 const buildSignatureLinkPayload = ({
   saleId,
   recipientType,
@@ -150,6 +198,8 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
   const [annexSignedUrls, setAnnexSignedUrls] = useState<Record<string, string>>({});
   const [expandedAnnexes, setExpandedAnnexes] = useState<Record<string, boolean>>({});
   const regenerateActionRef = useRef<HTMLDivElement | null>(null);
+  // Guarda síncrona contra doble clic (el estado `sending` sólo frena tras el re-render)
+  const sendingRef = useRef(false);
 
   const isPrivilegedRole = isAdmin || isSuperAdmin;
   const canViewPrintVersions = isAdmin || isSuperAdmin || role === 'supervisor';
@@ -293,6 +343,10 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
 
   const handleSendDocuments = async () => {
     if (!saleId || !saleTemplates?.length) return;
+    // Guarda anti-doble-clic: el estado `sending` recién frena en el siguiente render,
+    // así que dos clics muy rápidos podían entrar los dos. El ref frena de inmediato.
+    if (sendingRef.current) return;
+    sendingRef.current = true;
 
     try {
       setSending(true);
@@ -339,6 +393,12 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
       if (beneficiariesResult.error) throw beneficiariesResult.error;
       if (templateContentsResult.error) throw templateContentsResult.error;
       if (attachmentsResult.error) throw attachmentsResult.error;
+
+      // NOTA DE ORDEN (importante): el borrado de idempotencia NO se hace acá.
+      // Se hace lo más tarde posible, justo antes del insert, cuando el array de
+      // documentos ya está construido en memoria y TODAS las validaciones pasaron.
+      // Si se borrara acá, cualquier throw posterior (render de plantillas, validación
+      // de adherentes sin DDJJ, etc.) dejaría la venta SIN documentos.
 
       const sale = saleResult.data;
       const client = sale?.clients as any;
@@ -621,13 +681,16 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
           };
         });
 
-      await insertDocumentsWithFallback([
+      const documentsToInsert = [
         ...titularDocuments,
         ...beneficiaryDocuments,
         ...attachmentDocuments,
-      ]);
+      ];
 
-      // Validate adherentes have documents before creating links
+      // VALIDACIÓN DE NEGOCIO ANTES DE TOCAR LA BASE.
+      // Se corre sobre el array ya construido EN MEMORIA (beneficiaryDocuments), no sobre
+      // la base. Antes esta comprobación estaba DESPUÉS del borrado + insert, así que un
+      // adherente sin DDJJ abortaba la función habiendo ya borrado los documentos previos.
       const adherentesNeedingLinks = (effectiveBeneficiaries || []).filter(
         (b) => b.signature_required !== false && !b.is_primary
       );
@@ -646,7 +709,25 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
         }
       }
 
-      const signatureLinkRows = [
+      // Idempotencia: recién ACÁ se borran los documentos generados NO firmados de una
+      // ejecución previa. Sin esto, pulsar el botón N veces dejaba N contratos / N DDJJ /
+      // N anexos (caso real: venta 2026-000207 con 5 copias).
+      //
+      // El orden importa: no hay transacciones desde el cliente, así que la mitigación es
+      // minimizar la ventana entre "borré" e "inserté". El borrado va inmediatamente antes
+      // del insert, con el array completo en memoria y todas las validaciones ya pasadas,
+      // para que ningún throw pueda dejar la venta sin documentos.
+      const cleanupResult = await deleteUnsignedGeneratedDocuments(saleId);
+      if (cleanupResult.notFinalResult.error || cleanupResult.annexResult.error) {
+        console.warn(
+          '[DocGen] Limpieza previa incompleta:',
+          cleanupResult.notFinalResult.error || cleanupResult.annexResult.error
+        );
+      }
+
+      await insertDocumentsWithFallback(documentsToInsert);
+
+      const candidateSignatureLinkRows = [
         buildSignatureLinkPayload({
           saleId,
           recipientType: 'titular',
@@ -664,10 +745,42 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
         ),
       ];
 
-      const { error: signatureLinksError } = await supabase
+      // Evitar signature_links duplicados: si el destinatario (recipient_type + recipient_id)
+      // ya tiene un link utilizable —o uno ya completado, porque entonces YA firmó— no se
+      // crea otro. Estados en español usados en el proyecto: pendiente / visualizado /
+      // completado / revocado / expirado.
+      const { data: existingLinks, error: existingLinksError } = await supabase
         .from('signature_links')
-        .insert(signatureLinkRows as any);
-      if (signatureLinksError) throw signatureLinksError;
+        .select('id, recipient_type, recipient_id, status, is_active, expires_at')
+        .eq('sale_id', saleId);
+      if (existingLinksError) throw existingLinksError;
+
+      const recipientKey = (type?: string | null, id?: string | null) => `${type || ''}::${id || ''}`;
+      const nowMs = Date.now();
+      const alreadyCoveredRecipients = new Set(
+        (existingLinks || [])
+          .filter((link: any) => {
+            // Ya firmó: nunca re-crear el link.
+            if (link.status === 'completado') return true;
+            // Inutilizables: se puede crear uno nuevo.
+            if (link.status === 'revocado' || link.status === 'expirado') return false;
+            if (link.is_active === false) return false;
+            if (link.expires_at && new Date(link.expires_at).getTime() <= nowMs) return false;
+            return true;
+          })
+          .map((link: any) => recipientKey(link.recipient_type, link.recipient_id))
+      );
+
+      const signatureLinkRows = candidateSignatureLinkRows.filter(
+        (row) => !alreadyCoveredRecipients.has(recipientKey(row.recipient_type, row.recipient_id))
+      );
+
+      if (signatureLinkRows.length > 0) {
+        const { error: signatureLinksError } = await supabase
+          .from('signature_links')
+          .insert(signatureLinkRows as any);
+        if (signatureLinksError) throw signatureLinksError;
+      }
 
       // Validate workflow transition
       const { data: saleForValidation } = await supabase.from('sales').select('*, template_responses(id)').eq('id', saleId).single();
@@ -689,12 +802,22 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['sale-generated-documents', saleId] });
       queryClient.invalidateQueries({ queryKey: ['signature-links', saleId] });
-      toast.success('Documentos generados y enviados para firma. Redirigiendo...');
+      // El mensaje distingue si realmente se crearon enlaces nuevos. Si el anti-duplicado
+      // descartó todos los candidatos (ya había links vigentes o el destinatario ya firmó),
+      // no se reenvió nada: decirlo explícitamente para no confundir al vendedor.
+      if (candidateSignatureLinkRows.length > 0 && signatureLinkRows.length === 0) {
+        toast.success(
+          'Documentos regenerados. Se conservaron los enlaces de firma vigentes (no se generaron enlaces nuevos). Redirigiendo...'
+        );
+      } else {
+        toast.success('Documentos generados y enviados para firma. Redirigiendo...');
+      }
 
       navigate(`/signature-workflow/${saleId}`);
     } catch (error: any) {
       toast.error(error.message || 'Error al enviar documentos');
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
@@ -708,28 +831,15 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
       const tplIds = saleTemplates.map((st: any) => st.templates?.id || st.template_id).filter(Boolean);
 
       const [
-        deleteGeneratedResult,
-        deleteAnnexesResult,
+        deleteResults,
         saleResult,
         beneficiariesResult,
         templateContentsResult,
         templateResponsesResult,
         attachmentsResult,
       ] = await Promise.all([
-        supabase
-          .from('documents')
-          .delete()
-          .eq('sale_id', saleId)
-          .eq('generated_from_template', true)
-          .neq('status', 'firmado' as any)
-          .is('is_final', false),
-        supabase
-          .from('documents')
-          .delete()
-          .eq('sale_id', saleId)
-          .eq('generated_from_template', true)
-          .eq('document_type', 'anexo')
-          .neq('status', 'firmado' as any),
+        // Limpieza idempotente (mismo comportamiento que antes, ahora centralizado)
+        deleteUnsignedGeneratedDocuments(saleId),
         supabase
           .from('sales')
           .select(`*, clients:client_id(*), plans:plan_id(*), companies:company_id(*)`)
@@ -755,9 +865,12 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
           .order('sort_order', { ascending: true }),
       ]);
 
-      if (deleteGeneratedResult.error) {
-      }
-      if (deleteAnnexesResult.error) {
+      // Los errores de borrado no abortan la regeneración (comportamiento original)
+      if (deleteResults.notFinalResult.error || deleteResults.annexResult.error) {
+        console.warn(
+          '[DocGen] Limpieza previa incompleta:',
+          deleteResults.notFinalResult.error || deleteResults.annexResult.error
+        );
       }
       if (saleResult.error) throw saleResult.error;
       if (beneficiariesResult.error) throw beneficiariesResult.error;

@@ -206,6 +206,25 @@ export const useSubmitSignatureLink = () => {
       } catch {
       }
 
+      // Estado previo del enlace. Se captura ANTES del CAS para poder compensarlo (rollback)
+      // si más abajo salta la invariante de la contratada: sin esto el link quedaba
+      // 'completado' y cualquier reintento entraba por la rama `alreadyCompleted`, dejando a
+      // la contratada bloqueada para siempre.
+      let prevLinkState: { status: string | null; completed_at: string | null } | null = null;
+      try {
+        const { data: prevLink } = await signatureClient
+          .from('signature_links')
+          .select('status,completed_at')
+          .eq('id', linkId)
+          .maybeSingle();
+        if (prevLink) {
+          prevLinkState = {
+            status: (prevLink as any).status ?? null,
+            completed_at: (prevLink as any).completed_at ?? null,
+          };
+        }
+      } catch { /* best-effort: si falla, el rollback usa 'pendiente' */ }
+
       // CAS (compare-and-swap) atómico: solo marca 'completado' si AÚN NO lo está.
       // Si el titular hace doble/triple clic (o hay submits concurrentes), solo el
       // PRIMERO obtiene la fila; los demás reciben 0 filas y se cortan abajo, evitando
@@ -304,8 +323,11 @@ export const useSubmitSignatureLink = () => {
       } catch { /* not JSON, so it's canvas data */ }
 
       // Store signature in documents table for the sale
+      // Guardamos el id para poder borrar este documento si después salta la invariante
+      // de la contratada (si no, queda un `Firma - Contratada` huérfano por cada intento).
+      let firmaDocId: string | null = null;
       try {
-        await signatureClient
+        const { data: firmaDoc } = await signatureClient
           .from('documents')
           .insert({
             sale_id: data.sale_id,
@@ -317,7 +339,10 @@ export const useSubmitSignatureLink = () => {
             beneficiary_id: data.recipient_id || null,
             requires_signature: false,
             is_final: true,
-          });
+          })
+          .select('id')
+          .maybeSingle();
+        if (firmaDoc) firmaDocId = (firmaDoc as any).id ?? null;
       } catch (docErr) {
       }
 
@@ -328,23 +353,37 @@ export const useSubmitSignatureLink = () => {
 
         let contratadaMergedOk = false;
 
+        // Tipo de la OTRA parte del contrato (se usa en el merge y al concatenar bloques,
+        // para no duplicar el bloque de firma ya presente en el HTML).
+        const otherPartyType = recipientType === 'titular' ? 'contratada' : 'titular';
+
         // === CONTRATADA SPECIAL CASE ===
         // Merge contratada's signature into the existing titular's final contract
         // instead of creating a separate document
         if (recipientType === 'contratada') {
           try {
-            const { data: titularFinalDocs } = await signatureClient
+            // NO filtrar por is_final: si otro flujo (p. ej. reenvío del link del titular)
+            // reseteó is_final a false, la búsqueda no encontraba nada y el fallback de abajo
+            // BORRABA el contrato firmado por el titular. Traemos TODOS los contratos de la
+            // venta y elegimos en JS el que realmente tenga la firma del titular.
+            const { data: contratoDocs } = await signatureClient
               .from('documents')
               .select('*')
               .eq('sale_id', data.sale_id)
-              .eq('is_final', true)
               .is('beneficiary_id', null)
               .eq('document_type', 'contrato')
-              .order('created_at', { ascending: false })
-              .limit(1);
+              .order('created_at', { ascending: false });
 
-            if (titularFinalDocs && titularFinalDocs.length > 0) {
-              const titularDoc = titularFinalDocs[0];
+            const conFirmaTitular = (contratoDocs || []).filter(
+              (d: any) => typeof d.content === 'string' && d.content.includes('data-signer="titular"')
+            );
+            // Preferimos el que aún NO tenga la firma de la contratada (sigue con el placeholder).
+            const titularDoc =
+              conFirmaTitular.find((d: any) => d.content.includes('Pendiente firma de la empresa')) ||
+              conFirmaTitular[0] ||
+              null;
+
+            if (titularDoc) {
               let finalContent = titularDoc.content || '';
               const nowIso = new Date().toISOString();
               const safeSignedAt = new Date().toLocaleString('es-PY');
@@ -435,13 +474,19 @@ export const useSubmitSignatureLink = () => {
                 finalContent += contratadaBlock;
               }
 
-              // Update the existing final doc with both signatures merged
+              // Update the existing final doc with both signatures merged.
+              // `is_final: true` + `status: 'firmado'` son OBLIGATORIOS: la búsqueda de
+              // titularDoc ya no filtra por is_final, así que puede venir con false/null.
+              // Si quedara así, `finalize-signature-link` (que consulta is_final = true) no le
+              // genera el PDF ni lo firma con PAdES y el contrato correcto queda invisible.
               await signatureClient
                 .from('documents')
                 .update({
                   content: finalContent,
                   signed_at: nowIso,
                   signature_data: signatureData,
+                  is_final: true,
+                  status: 'firmado' as any,
                 } as any)
                 .eq('id', titularDoc.id);
 
@@ -458,10 +503,67 @@ export const useSubmitSignatureLink = () => {
                 .is('beneficiary_id', null)
                 .eq('document_type', 'contrato');
 
+              // RECONCILIACIÓN: dejar UN SOLO contrato final en la venta (el que acabamos de
+              // mergear, con ambas firmas). Sin esto la venta quedaba con varios is_final=true
+              // y `finalize-signature-link` generaba/enviaba un PDF por cada uno.
+              try {
+                await signatureClient
+                  .from('documents')
+                  .update({ is_final: false } as any)
+                  .eq('sale_id', data.sale_id)
+                  .is('beneficiary_id', null)
+                  .eq('document_type', 'contrato')
+                  .neq('id', titularDoc.id);
+              } catch (dedupeErr) {
+                // No debe impedir que la firma se complete.
+                console.error('[firma][contratada] no se pudo desmarcar los contratos finales duplicados:', dedupeErr);
+              }
+
               contratadaMergedOk = true;
             }
           } catch (mergeErr) {
+            // Nunca silenciar: si el merge falla, abajo se lanza un error de invariante.
+            console.error('[firma][contratada] merge falló:', mergeErr);
           }
+        }
+
+        // INVARIANTE DE SEGURIDAD: el bloque `if (!contratadaMergedOk)` hace un DELETE de los
+        // documentos finales y reconstruye desde la plantilla sin firma. Para la CONTRATADA eso
+        // destruiría la firma ya capturada del titular. Preferimos fallar de forma visible.
+        if (!contratadaMergedOk && recipientType === 'contratada') {
+          // COMPENSACIÓN (rollback best-effort). Al llegar acá ya se ejecutaron dos escrituras:
+          //  1) el CAS que dejó el signature_link en 'completado' → sin revertirlo, cualquier
+          //     reintento cae en la rama `alreadyCompleted` y la contratada queda BLOQUEADA;
+          //  2) el insert del documento `Firma - Contratada` → queda huérfano.
+          // Cada paso va en su propio try/catch para que un fallo de limpieza no tape el
+          // error original de invariante, que es el que debe llegar a la UI.
+          try {
+            await signatureClient
+              .from('signature_links')
+              .update({
+                status: prevLinkState?.status ?? 'pendiente',
+                completed_at: prevLinkState?.completed_at ?? null,
+              })
+              .eq('id', linkId);
+            console.error('[firma][contratada] invariante: signature_link revertido a', prevLinkState?.status ?? 'pendiente', '(reintentable)', { linkId });
+          } catch (rbLinkErr) {
+            console.error('[firma][contratada] no se pudo revertir el signature_link:', rbLinkErr);
+          }
+
+          try {
+            if (firmaDocId) {
+              await signatureClient.from('documents').delete().eq('id', firmaDocId);
+              console.error('[firma][contratada] invariante: documento "Firma - Contratada" eliminado', { firmaDocId });
+            }
+          } catch (rbDocErr) {
+            console.error('[firma][contratada] no se pudo borrar el documento de firma huérfano:', rbDocErr);
+          }
+
+          const invariantErr: any = new Error(
+            'No se encontró el contrato firmado por el titular. No se puede firmar como contratada sin perder la firma del cliente. Contactá al administrador.'
+          );
+          invariantErr.__fatalSignature = true; // marca para que el catch exterior lo re-lance
+          throw invariantErr;
         }
 
         if (!contratadaMergedOk) {
@@ -558,17 +660,24 @@ export const useSubmitSignatureLink = () => {
           let existingOtherPartyBlock: string | null = null;
           if (recipientType === 'titular' || recipientType === 'contratada') {
             try {
-              const otherType = recipientType === 'titular' ? 'contratada' : 'titular';
-              const { data: otherFinalDocs } = await signatureClient
+              const otherType = otherPartyType;
+              // SIN filtro `.eq('is_final', true)`: esta consulta corre DESPUÉS del delete de
+              // arriba, que borra justamente los is_final=true. Con el filtro, al re-firmar el
+              // titular se perdía el bloque ya firmado de la contratada. Traemos todos los
+              // contratos de la venta (más nuevo primero) y elegimos en JS el que realmente
+              // contiene el bloque de la otra parte.
+              const { data: otherContractDocs } = await signatureClient
                 .from('documents')
-                .select('content')
+                .select('content,created_at')
                 .eq('sale_id', data.sale_id)
-                .eq('is_final', true)
                 .is('beneficiary_id', null)
                 .like('document_type', '%contrato%')
-                .limit(1);
-              if (otherFinalDocs && otherFinalDocs.length > 0) {
-                const otherContent = otherFinalDocs[0].content || '';
+                .order('created_at', { ascending: false });
+              const otherPartyDoc = (otherContractDocs || []).find(
+                (d: any) => typeof d.content === 'string' && d.content.includes(`data-signer="${otherType}"`)
+              );
+              if (otherPartyDoc) {
+                const otherContent = otherPartyDoc.content || '';
                 try {
                   const parser = new DOMParser();
                   const parsedDoc = parser.parseFromString(otherContent, 'text/html');
@@ -784,9 +893,21 @@ export const useSubmitSignatureLink = () => {
               }
             }
 
-            // Clean up any raw attribute text that leaked from sanitization
-            const rawAttrRegex = /data-signature-field\s*=\s*["']true["'][^<]*/gi;
+            // Limpieza de texto de atributos que se filtró de la sanitización.
+            // Antes usaba `[^<]*`, que consumía TODO hasta el siguiente `<` — incluido el `>`
+            // que cierra la etiqueta — dejando `<div ` sin cerrar y produciendo el HTML
+            // corrupto `<div <div class="text-center...`. `[^<>]*` no puede cruzar el `>`.
+            const rawAttrRegex = /data-signature-field\s*=\s*["']true["'][^<>]*/gi;
+            const prevContent = finalContent;
             finalContent = finalContent.replace(rawAttrRegex, '');
+            // Guarda de seguridad: si aun así quedó una etiqueta sin cerrar, descartamos la limpieza.
+            if (/<\w+\s+</.test(finalContent)) {
+              console.error(
+                '[firma] limpieza de data-signature-field produjo HTML corrupto (etiqueta sin cerrar); se descarta el replace.',
+                { docId: doc.id, docName: doc.name }
+              );
+              finalContent = prevContent;
+            }
 
             // Then try placeholder patterns
             if (!placeholderFound) {
@@ -817,7 +938,15 @@ export const useSubmitSignatureLink = () => {
 
             // For contract documents: merge with existing other party block if available
             const isContractDoc = doc.document_type === 'contrato' || doc.name?.toLowerCase().includes('contrato');
-            if (isContractDoc && existingOtherPartyBlock && (recipientType === 'titular' || recipientType === 'contratada')) {
+            // Solo concatenar si el bloque de la otra parte NO está ya presente:
+            // si el merge previo lo insertó, agregarlo de nuevo duplicaba la firma.
+            const yaTieneOtraParte = finalContent.includes(`data-signer="${otherPartyType}"`);
+            if (
+              isContractDoc &&
+              existingOtherPartyBlock &&
+              !yaTieneOtraParte &&
+              (recipientType === 'titular' || recipientType === 'contratada')
+            ) {
               // Add the other party's block side by side
               finalContent = `${finalContent}${existingOtherPartyBlock}`;
             }
@@ -853,7 +982,11 @@ export const useSubmitSignatureLink = () => {
             .in('id', docsToSign.map((d) => d.id));
         }
         } // end if (!contratadaMergedOk)
-      } catch (signedDocsErr) {
+      } catch (signedDocsErr: any) {
+        console.error('[firma] error armando documentos finales:', signedDocsErr);
+        // El error de invariante NO puede tragarse: debe llegar al onError del mutation
+        // para que la UI le muestre al usuario que no se firmó.
+        if (signedDocsErr?.__fatalSignature) throw signedDocsErr;
       }
 
       // Log in process_traces for audit trail
