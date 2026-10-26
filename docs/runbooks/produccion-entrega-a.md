@@ -142,7 +142,7 @@ Nunca se pasa por **front nuevo + base vieja**, que es lo único que rompería.
 
 | Paso | ¿Se corta? | Detalle |
 |---|---|---|
-| Base de datos | No | Tablas chicas (294 ventas): cada cambio bloquea milisegundos. `lock_timeout` cancela en vez de esperar |
+| Base de datos | No | Tablas chicas (306 ventas al 2026-10-25): cada cambio bloquea milisegundos. `lock_timeout` cancela en vez de esperar |
 | Edge functions | No | Supabase cambia la versión de forma atómica |
 | Front | **2 a 5 s** | `docker-compose.yml` publica un solo contenedor (`prepaga-web`, puerto `8080`). Se construye la imagen **antes**, con el viejo atendiendo, y recién después se recrea el contenedor. De noche y sin firmas en curso |
 
@@ -249,3 +249,100 @@ completa se hace la misma noche, **antes de abrir el sistema a los usuarios**.
 - `sql/verificar-*.sql`: verificaciones usadas en test, reutilizables como base de la foto de controles.
 - Migraciones del módulo: `supabase/migrations/20260804*` … `20261007000001`.
 - En el repo local quedó agregado el remote `saa` (sólo fetch). Se quita con `git remote remove saa`.
+
+---
+
+## 11. Plan de ajustes al script de producción (2026-10-25)
+
+> Segundo relevamiento de **sólo lectura** sobre BR prod. Hoy: **306 ventas** (280 `completado`),
+> 372 beneficiarios (270 titulares/primarios), 322 clientes, 10 plantillas, 2 empresas, PostgreSQL 17.6.
+> Este apartado reemplaza al §3 donde se contradigan.
+
+### Principio: el script no escribe ni una fila que ya exista
+
+Sólo se permite: `ADD COLUMN` con default constante, `CREATE TABLE/FUNCTION/TRIGGER/INDEX/POLICY`
+e `INSERT` de filas **nuevas** (las plantillas). **Cero `UPDATE`/`DELETE` sobre filas existentes.**
+
+No es por prolijidad. En prod `beneficiaries` tiene 4 triggers, y cualquier `UPDATE` sobre esa
+tabla los dispara:
+
+| Trigger | Qué haría un `UPDATE` masivo |
+|---|---|
+| `trg_set_titular_amount` (BEFORE) | Recalcula `amount` del titular si está en 0/NULL (sólo existe en prod) |
+| `trg_recalculate_sale_total` (AFTER) | Recalcula el total de la venta → **duplica las 3 ventas** del §3 |
+| `trg_audit_beneficiaries` | Una fila de `audit_logs` por beneficiario tocado |
+| `trg_beneficiaries_block_when_sale_signed` (nuevo) | Aborta el script en las 280 ventas completadas |
+
+En PG 17, `ADD COLUMN ... DEFAULT <constante>` no reescribe la tabla y **no dispara triggers**.
+
+### Ajustes necesarios
+
+| # | Dónde | Problema en prod | Ajuste |
+|---|---|---|---|
+| **A1** | PASO 0 (nuevo) | Ninguna migración crea `beneficiaries.status` ni `beneficiaries.coverage_end_date`. La primera la filtran `recalculate_sale_total_amount` y la baja; la segunda la escriben `useCreateNominaTermination` y `activate_adherent_incorporation`. Sin ella **la primera baja falla** | `status text NOT NULL DEFAULT 'active'` + `beneficiaries_status_check IN ('active','inactive','pending_addendum_signature')`, y `coverage_end_date date`. **Con el DEFAULT**: así el `UPDATE ... WHERE status IS NULL` de `20260908000004` encuentra 0 filas y no dispara nada |
+| **A2** | `20260818000001` | El backfill reescribe el total de 2026-000109, 000191 y 000207 (lo duplica). Las otras 303 ventas ya cuadran con la fórmula nueva (verificado) | El backfill queda **sólo como reporte** (`RAISE NOTICE`, sin `PERFORM`). La verificación final espera **exactamente esas 3** diferencias y aborta si aparece una cuarta |
+| **A3** | `20260818000002` | El preflight exige `approve_sale_addendum` y `try_complete_sale_addendum_for_link`, que en prod no existen → aborta. Y el bloque `ALTER FUNCTION ... SET` sobre funciones inexistentes da `undefined_function`, que su `EXCEPTION` (sólo `insufficient_privilege`) no atrapa → aborta igual | Variante de prod: el preflight exige sólo `activate_adherent_incorporation()` y se quita el bloque de `ALTER FUNCTION`. El regex de exención queda igual (nombrar funciones que no existen no hace daño) |
+| **A4** | `20260822000003` | Versiona `complete_adherent_incorporation`, legado que no llama nadie y que escribe `beneficiaries.source_incorporation_id` / `activated_at`, columnas que prod no tiene | **No se aplica en prod.** Sólo existía para pasar el preflight de A3 |
+| **A5** | `20260822000002`, `20260908000006` | Insertan 5 plantillas × 2 empresas = 10, **activas**. El front viejo (`SaleTemplatesTab` de `main`) lista toda plantilla activa **sin filtrar por empresa**: entre el cambio de base y el del front, los vendedores verían 10 opciones nuevas (duplicadas por empresa) y podrían adjuntar un "Contrato Colectivo" a una venta común | Se siembran con `is_active = false`. Se activan **después** del front nuevo con un `UPDATE` acotado a esos 10 ids (filas que este mismo pase creó) |
+| **A6** | Comisiones | `20260819000003` hace `ALTER TABLE commission_items`, que en prod no existe → aborta | Fuera de esta vuelta: se excluyen los 10 `20260804*`, `20260819000003` y `20261007000001` |
+| **A7** | `20260910000003` | Ninguno: `pg_cron` 1.6.4 ya está y el job no usa `pg_net` | Se aplica tal cual. Hoy no genera avisos: `contract_end_date` nace NULL en todas las ventas (la migración no hace backfill a propósito) |
+
+Lo que **no** necesita ajuste (verificado contra prod): `generate_contract_number` de prod es
+idéntica a la "rama original" que conserva `20260813000002`, así que la serie `2026-NNNNNN` no
+cambia; no hay plantillas con nombre repetido ni que choquen con las sembradas; las columnas
+`NOT NULL DEFAULT` de `clients`/`sales` (`client_type`, `employee_signature_mode`) pasan sus CHECK
+con el default.
+
+### Orden del script único (`sql/produccion-entrega-a.sql`, a escribir)
+
+```
+BEGIN;  SET LOCAL lock_timeout = '3s';  SET LOCAL statement_timeout = '120s';
+  0. Foto "antes" en un esquema scratch (el SQL Editor no conserva TEMP)
+  1. PASO 0 (A1)
+  2. 20260813000001 · 000002 · 000003 · 20260817000001 · 000002
+  3. 20260818000001 (A2) · 20260818000002 (A3) · 20260818000003
+  4. 20260819000001 · 000002
+  5. 20260822000001 · 000002 (A5)            -- 20260822000003 NO (A4)
+  6. 20260908000001 … 000005 · 000006 (A5)
+  7. 20260909000001 · 000002 · 20260910000001 … 000004
+  8. Foto "después" + guarda (abajo) → RAISE EXCEPTION si no cuadra
+  9. Registrar en supabase_migrations.schema_migrations sólo las versiones aplicadas
+COMMIT;
+```
+
+### Guarda de datos (paso 8): prueba que ninguna fila existente cambió
+
+No alcanza con contar filas: un `UPDATE` no cambia el conteo. La foto guarda, por tabla, el
+conteo **y un md5 de las columnas que existían antes**:
+
+| Tabla | Columnas del md5 | Esperado después |
+|---|---|---|
+| `sales` | `id, status, total_amount, titular_amount, contract_number, plan_id` | idéntico |
+| `beneficiaries` | `id, sale_id, amount, is_primary, relationship` | idéntico |
+| `clients`, `documents`, `signature_links`, `signatures` | `id, updated_at` (+ `is_final`, `signed_pdf_url` en documents) | idéntico |
+| `audit_logs` | conteo | **idéntico** — si creció, algún trigger disparó |
+| `templates` | conteo | **+10**, todas `is_active = false` |
+| Resto de las tablas de `public` | conteo | idéntico |
+
+Si cualquier fila no da, el script aborta y prod queda exactamente como estaba.
+
+### Secuencia completa
+
+1. **Escribir el script** con A1–A7 y la guarda. Revisarlo con `grep -iE 'update|delete|truncate|drop'`:
+   cada aparición tiene que estar justificada (objeto nuevo o 0 filas).
+2. **Ensayo** sobre una copia restaurada del `pg_dump` de prod (Fase 1): correrlo, después
+   **front viejo** contra la copia (red del rollback) y **front nuevo** con el recorrido completo.
+   Probar a propósito una **baja** (valida A1) y una **edición de adherente en una venta
+   completada** (tiene que dar el error del guard).
+3. **Simulacro sobre prod**: el mismo archivo con `ROLLBACK` en vez de `COMMIT`.
+4. **Cambio real** (Fase 3): backup → script con `COMMIT` → edge functions → front.
+5. **Recién con el front nuevo arriba**: activar las 10 plantillas (A5).
+6. Verificación final: las queries de detección del bug #13 de `CLAUDE.md` en 0 y la guarda
+   vuelta a correr en modo lectura.
+
+### Decisión de negocio que sigue abierta, y por qué importa más que antes
+
+Las 3 ventas de A2 quedan con su total actual. Pero si algún día se firma un **alta de adherente
+sobre una de ellas**, la activación recalcula el contrato madre con la fórmula nueva y **el total
+salta al doble en ese momento**. Hay que decidir el total correcto de esas 3 **antes** de habilitar
+Movimientos, o como mínimo antes de cargar un anexo sobre ellas.
