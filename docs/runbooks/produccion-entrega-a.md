@@ -293,22 +293,44 @@ cambia; no hay plantillas con nombre repetido ni que choquen con las sembradas; 
 `NOT NULL DEFAULT` de `clients`/`sales` (`client_type`, `employee_signature_mode`) pasan sus CHECK
 con el default.
 
-### Orden del script único (`sql/produccion-entrega-a.sql`, a escribir)
+### El script (generado)
+
+| Archivo | Qué hace |
+|---|---|
+| `scripts/produccion/build-entrega-a.mjs` | Generador. Copia cada migración **tal cual** y aplica sólo los ajustes A2, A3 y A5, cada uno como un reemplazo de texto exacto que falla si no encuentra el original |
+| `sql/produccion-entrega-a-SIMULACRO.sql` | Ejecuta todo y lo deshace. Termina con el error `SIMULACRO OK — nada quedo aplicado…`, **que es el resultado esperado** |
+| `sql/produccion-entrega-a.sql` | Ejecuta todo y lo deja aplicado. Termina con un `SELECT` que dice `PASE APLICADO` |
+| `scripts/produccion/ensayo/` | Ensayo en PGlite (Postgres en WASM) sobre una réplica mínima de prod |
+
+No se editan a mano: si cambia una migración, se vuelve a correr el generador.
+
+**Es una sola sentencia** (un `DO` que ejecuta cada paso con `EXECUTE`), no un `BEGIN … COMMIT`.
+El SQL Editor del dashboard no mantiene una sesión entre sentencias, así que un `BEGIN` escrito en
+el texto no garantiza el rollback: el 2026-10-08 un script dio error y aun así quedó aplicado
+entero. Con varias sentencias, el SIMULACRO pegado en el editor podría haber dejado el pase
+aplicado en prod. Una sentencia única es atómica en cualquier cliente.
 
 ```
-BEGIN;  SET LOCAL lock_timeout = '3s';  SET LOCAL statement_timeout = '120s';
-  0. Foto "antes" en un esquema scratch (el SQL Editor no conserva TEMP)
-  1. PASO 0 (A1)
-  2. 20260813000001 · 000002 · 000003 · 20260817000001 · 000002
-  3. 20260818000001 (A2) · 20260818000002 (A3) · 20260818000003
-  4. 20260819000001 · 000002
-  5. 20260822000001 · 000002 (A5)            -- 20260822000003 NO (A4)
-  6. 20260908000001 … 000005 · 000006 (A5)
-  7. 20260909000001 · 000002 · 20260910000001 … 000004
-  8. Foto "después" + guarda (abajo) → RAISE EXCEPTION si no cuadra
-  9. Registrar en supabase_migrations.schema_migrations sólo las versiones aplicadas
-COMMIT;
+DO $pase_entrega_a$                       -- una sola sentencia: todo o nada
+  lock_timeout = 3s
+  0.a Precondiciones: aborta si ya está aplicado, o si la base no es BR prod
+  0.b Foto "antes" (esquema pe_scratch)
+  PASO 0 (A1)
+  20260813000001 · 000002 · 000003 · 20260817000001 · 000002
+  20260818000001 (A2) · 20260818000002 (A3) · 20260818000003
+  20260819000001 · 000002
+  20260822000001 · 000002 (A5)            -- 20260822000003 NO (A4)
+  20260908000001 … 000005 · 000006 (A5)
+  20260909000001 · 000002 · 20260910000001 … 000004
+  Verificación de objetos → guarda de datos → las 3 ventas conocidas
+  Registro de las 24 versiones en supabase_migrations.schema_migrations
+  REAL: borra pe_scratch  ·  SIMULACRO: RAISE 'SIMULACRO OK' → se deshace todo
 ```
+
+Si algo falla, el mensaje termina en `[paso: <migración o paso>]`.
+
+> ⚠️ Las versiones excluidas (comisiones y `20260822000003`) **no** se registran en el historial.
+> Un `db push` futuro contra prod intentaría aplicarlas: comisiones necesita su propio pase.
 
 ### Guarda de datos (paso 8): prueba que ninguna fila existente cambió
 
@@ -326,17 +348,58 @@ conteo **y un md5 de las columnas que existían antes**:
 
 Si cualquier fila no da, el script aborta y prod queda exactamente como estaba.
 
+> **Implementación real** (más fuerte que la tabla de arriba): la huella cubre las **88 tablas de
+> `public`** y **todas** sus columnas preexistentes. Los valores de más de 2000 bytes (PDF en
+> base64, HTML, `old/new_values` de auditoría, que viven en TOAST) entran por su tamaño almacenado,
+> que se lee sin descomprimirlos: así cada foto lee ~30 MB y no ~1 GB. Medido en prod con la misma
+> consulta en modo lectura: **4,5 s por foto**, 0 tablas sin permiso de lectura.
+>
+> **Efecto en los usuarios**: la segunda foto corre con las tablas ya bloqueadas, así que durante
+> esos ~5 s las escrituras sobre `sales`/`beneficiaries`/`clients`/`templates` **esperan** (no
+> fallan). De noche, sin firmas en curso.
+>
+> **Falsos positivos posibles**: si un usuario o un cron escribe en cualquier tabla entre las dos
+> fotos, la guarda aborta. No se aplica nada, y se vuelve a correr. Los crons de prod corren a los
+> **:00** (`signature_links`) y a los **:00 y :30** (`signature_identity_verification`): evitar
+> esos minutos.
+
+### Verificación hecha (2026-10-25)
+
+**Contra prod, sólo lectura**: precondiciones OK; 2 empresas → 10 plantillas nuevas y 0 que choquen
+por nombre; 0 nombres duplicados; 0 avisos de vencimiento previos; 0 ventas-operación previas;
+ninguna de las 24 versiones ya registrada; las firmadas fuera de fórmula son **exactamente** las 3
+conocidas, y las abiertas fuera de fórmula son 0; sin transacciones largas.
+
+**Ensayo en PGlite** (`scripts/produccion/ensayo/run.mjs`; es PG 18, prod es 17): 28/28 OK.
+
+| Caso | Resultado |
+|---|---|
+| SIMULACRO | Termina en `SIMULACRO OK`, y la base queda idéntica fila por fila: sin tablas, columnas ni esquema residual |
+| REAL | Todas las tablas preexistentes idénticas (comparadas por separado, no con la huella del script); totales sin cambio; `audit_logs` no crece; +10 plantillas inactivas; job agendado; 24 versiones registradas |
+| Después del REAL | El guard frena editar un adherente de una venta completada; un alta en borrador recalcula `titular + adherentes`; una fila de baja (`inactive` + `coverage_end_date`) se inserta y no suma; la numeración sigue en `2026-000301` |
+| Segunda corrida | Aborta en la precondición |
+| Sabotajes inyectados | `UPDATE` con **los mismos valores** sobre una venta; nombre pasado a minúscula; `DELETE` de una notificación; plantilla sembrada activa. **Los cuatro abortan por la guarda**, y no queda nada aplicado |
+
 ### Secuencia completa
 
-1. **Escribir el script** con A1–A7 y la guarda. Revisarlo con `grep -iE 'update|delete|truncate|drop'`:
-   cada aparición tiene que estar justificada (objeto nuevo o 0 filas).
+1. ~~Escribir el script~~ — hecho (generado, ver arriba).
 2. **Ensayo** sobre una copia restaurada del `pg_dump` de prod (Fase 1): correrlo, después
    **front viejo** contra la copia (red del rollback) y **front nuevo** con el recorrido completo.
    Probar a propósito una **baja** (valida A1) y una **edición de adherente en una venta
    completada** (tiene que dar el error del guard).
-3. **Simulacro sobre prod**: el mismo archivo con `ROLLBACK` en vez de `COMMIT`.
-4. **Cambio real** (Fase 3): backup → script con `COMMIT` → edge functions → front.
-5. **Recién con el front nuevo arriba**: activar las 10 plantillas (A5).
+3. **Simulacro sobre prod**: `sql/produccion-entrega-a-SIMULACRO.sql`. El resultado correcto es
+   el error `SIMULACRO OK`. Después, confirmar por lectura que no quedó nada:
+   `SELECT to_regclass('public.adherent_incorporations')` tiene que dar `NULL`.
+4. **Cambio real** (Fase 3): backup → `sql/produccion-entrega-a.sql` → edge functions → front.
+5. **Recién con el front nuevo arriba**: activar las 10 plantillas (A5):
+   ```sql
+   UPDATE public.templates SET is_active = true
+    WHERE is_active = false
+      AND name IN ('Anexo de Incorporación de Adherente', 'Formulario de Solicitud de Cambio de Plan',
+                   'Anexo Especial de Vigencia Inmediata', 'Contrato Colectivo de Empresa',
+                   'Anexo de Movimiento de Nomina');
+   -- esperado: 10 filas. No dispara versionado (create_template_version sólo mira content).
+   ```
 6. Verificación final: las queries de detección del bug #13 de `CLAUDE.md` en 0 y la guarda
    vuelta a correr en modo lectura.
 
