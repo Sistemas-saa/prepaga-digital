@@ -48,6 +48,11 @@ desplegada. Redesplegar (ver *Comandos Útiles*).
 > Si volvés a modificar este archivo, que sea con intención — no como efecto colateral de
 > un deploy de Lovable.
 
+> ⚠️ **Eso es cierto en `codex/incorporacion-entrega-a`, no en `main`** (relevado el
+> 2026-11-02): la v82 entró en `af7ba59`, que sólo está en esa rama, y en `main` sigue la
+> versión de Lovable (`headerTemplate`). Hasta que se mergee, **no desplegar
+> `generate-base-pdf` desde `main`**.
+
 ---
 
 ## Arquitectura del Sistema
@@ -1246,6 +1251,13 @@ resultado, y el script aborta si cambia un solo cálculo o un período.
 - Sigue **sin estar en BR producción**.
 
 ### Deploy — nunca a producción por accidente
+
+> ⚠️ **`db push` contra BR**: hoy la CLI lo rechaza porque el historial de prod tiene 89
+> versiones sin archivo en el repo (*"Remote migration versions not found…"*). Esa es la única
+> barrera que impide aplicar en prod las migraciones de comisiones que el pase de la Entrega A
+> excluye. **Nunca correr `supabase migration repair` contra `ejiycfqxgtrzaysgpzmx`**, aunque la
+> CLI lo sugiera. El repo local suele estar linkeado a BR (`supabase/.temp/project-ref`):
+> `npx supabase unlink` evita que un comando sin `--project-ref` vaya a prod.
 
 `supabase/config.toml` apunta a **BR producción**, así que cualquier `db push` o
 `functions deploy` sin `--project-ref` va a prod. Usar siempre los scripts:

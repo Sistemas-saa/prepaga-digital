@@ -73,7 +73,14 @@ Hace falta un **PASO 0** que cree lo que falta antes de aplicar el módulo.
 | `generate-pdf` | Desplegar (cambió `_shared/client-document.ts`) |
 | `compose-template-pdf` | Desplegar (mismo motivo) |
 | `generate-commission-pdf` | Desplegar **sólo si va comisiones**; en prod no existe |
-| `generate-base-pdf` | **No se redespliega.** El repo es la v82, igual a prod. Sólo verificar que siga teniendo `table-header-group` |
+| `generate-base-pdf` | **EXCLUIDA del pase: no se redespliega.** Sólo verificar que la de prod siga teniendo `table-header-group` |
+
+> ⚠️ **`generate-base-pdf` difiere entre `main` y esta rama, y el lado roto es `main`.** En
+> `main` está la versión de Lovable (`headerTemplate`, `displayHeaderFooter: true`: PDFs sin
+> encabezado ni zócalo). La v82 correcta, igual a la de prod, entró al repo en `af7ba59`, que
+> **sólo está en esta rama**. Mientras no se mergee, **nunca desplegar `generate-base-pdf` desde
+> `main`**. El pase no la despliega: el paso de edge functions nombra las funciones una por una
+> (nunca `functions deploy` sin nombre).
 
 ---
 
@@ -119,12 +126,13 @@ comportamiento correcto (bug #11 de `CLAUDE.md`), pero **hay que avisarles**.
 ## 4. Garantías de que no se pierde ningún dato
 
 1. El script **no contiene `DELETE`, `TRUNCATE` ni `DROP`** sobre nada que exista hoy en prod. Se revisa a mano antes de correrlo.
-2. **Guarda automática:** cuenta las filas de cada tabla al empezar y al terminar. Si **alguna tabla termina con menos filas, aborta.**
-3. **Una sola transacción:** si falla cualquier línea, no queda nada aplicado.
-4. **`lock_timeout` corto:** si una tabla está en uso, el script se cancela en vez de dejar a los usuarios esperando.
-5. **No se modifican los totales de ventas firmadas.**
-6. **Backup `pg_dump` descargado** antes del ensayo y otro inmediatamente antes del cambio real.
-7. **Foto de controles** antes y después: filas por tabla, suma de totales, cantidad de documentos firmados. Tiene que dar idéntica, salvo lo previsto.
+2. **Guarda automática:** antes de tocar nada guarda la identidad física (`ctid` + `xmin`) de **cada fila de cada tabla** y las columnas con su tipo. Si al final **una sola fila preexistente fue escrita** (aunque sea con los mismos valores), borrada, o desapareció una columna, **aborta**. Detalle en §11.
+3. **Una sola sentencia:** si falla cualquier paso, no queda nada aplicado.
+4. **`lock_timeout` corto:** si una tabla está en uso **al pedir el bloqueo**, el script se cancela en vez de encolar a los usuarios. Ojo: limita la espera, no cuánto dura el bloqueo una vez tomado (ver §5).
+5. **Destino verificado:** el esquema de `public` tiene que coincidir columna por columna con la referencia aprobada de prod; si no, aborta sin hacer nada.
+6. **No se modifican los totales de ventas firmadas.**
+7. **Backup `pg_dump` descargado** antes del ensayo y otro inmediatamente antes del cambio real. El `pg_dump` **no incluye Storage** (los PDFs): el pase no toca Storage, así que restaurar la base no los afecta, pero tampoco los protege. Ver §8.
+8. **Foto de controles** antes y después: filas por tabla, suma de totales, cantidad de documentos firmados. Tiene que dar idéntica, salvo lo previsto.
 
 ---
 
@@ -142,7 +150,7 @@ Nunca se pasa por **front nuevo + base vieja**, que es lo único que rompería.
 
 | Paso | ¿Se corta? | Detalle |
 |---|---|---|
-| Base de datos | No | Tablas chicas (306 ventas al 2026-10-25): cada cambio bloquea milisegundos. `lock_timeout` cancela en vez de esperar |
+| Base de datos | **Pausa breve, a medir** | Desde el `ALTER TABLE` del PASO 0 hasta el final del script, las tablas alteradas (`beneficiaries`, `sales`, `clients`, `templates`…) quedan con bloqueo exclusivo: **se frenan lecturas y escrituras** (esperan, no fallan). Tablas chicas (306 ventas) y guarda de 0,08 s; en PGlite la ventana fue 0,13 s, pero **en prod hay que medirla**: el SIMULACRO la informa (`Tablas bloqueadas X s`). `lock_timeout = 3s` sólo limita la espera para *conseguir* cada bloqueo |
 | Edge functions | No | Supabase cambia la versión de forma atómica |
 | Front | **2 a 5 s** | `docker-compose.yml` publica un solo contenedor (`prepaga-web`, puerto `8080`). Se construye la imagen **antes**, con el viejo atendiendo, y recién después se recrea el contenedor. De noche y sin firmas en curso |
 
@@ -164,7 +172,32 @@ Nunca se pasa por **front nuevo + base vieja**, que es lo único que rompería.
 ### Fase 1: ensayo con una copia de prod · 2 a 3 días
 
 - Restaurar el backup en una base aparte: `supabase start` local o un proyecto Supabase de prueba.
+- **Aislar la copia ANTES de abrirle cualquier front** (tiene teléfonos reales de clientes):
+  ```sql
+  -- en la COPIA, nunca en prod
+  UPDATE public.company_settings SET whatsapp_gateway_url = NULL, whatsapp_api_key = NULL,
+         contratada_auto_whatsapp = false, email_api_key = NULL, sms_api_key = NULL,
+         twilio_auth_token = NULL, signwell_api_key = NULL;
+  UPDATE public.company_otp_policy SET otp_whatsapp_gateway_url = NULL, smtp_host = NULL,
+         smtp_relay_url = NULL;
+  SELECT cron.unschedule(jobid) FROM cron.job;  -- los 2 de prod son UPDATE internos, pero
+                                                -- disparan falsos abortos de la guarda
+  ```
+  Las edge functions leen la configuración de WAHA **de la base**: con eso vacío, una firma de
+  prueba no puede mandar WhatsApp a un cliente real. Los secrets del proyecto de la copia
+  (`RENDER_URL`, etc.) se cargan a mano y **sin** credenciales de WAHA de prod.
+- Aislar la copia cambia filas de configuración, no columnas: la precondición de esquema del
+  script sigue pasando.
 - Correr el script y revisar la foto de controles.
+- **Cómo apuntar un front a la copia sin tocar `client.ts`**: cualquier `vite build` apunta a
+  prod a propósito, y el build de test sólo acepta el proyecto US. Para el ensayo se usa
+  `vite dev`, que es el único modo que acepta otra base:
+  1. `.env.local` con `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` de la copia.
+  2. Front nuevo: `npm run dev` en esta rama. Front viejo: `git worktree add ../pd-main main` y
+     `npm run dev` ahí, con el mismo `.env.local` (el `client.ts` de `main` también acepta el
+     override en dev).
+  3. **Antes de loguearse**, verificar en DevTools → Network que los pedidos van a
+     `<ref-de-la-copia>.supabase.co` y no a `ejiycfqxgtrzaysgpzmx`.
 - **Front nuevo** contra la copia, con el recorrido completo:
   - abrir ventas viejas y ver sus PDFs
   - firma titular → contratada
@@ -176,19 +209,28 @@ Nunca se pasa por **front nuevo + base vieja**, que es lo único que rompería.
 
 ### Fase 2: simulacro sobre prod · 2 horas
 
-- El script dentro de `BEGIN … ROLLBACK`: ejecuta todo, muestra los resultados y **deshace todo**.
+- `sql/produccion-entrega-a-SIMULACRO.sql`: ejecuta todo y **deshace todo** (es una sola
+  sentencia, no un `BEGIN … ROLLBACK`; ver §11). El resultado esperado es el error
+  `SIMULACRO OK`, que además informa **cuántos segundos estuvieron bloqueadas las tablas** y
+  si `db push` sigue bloqueado. Con esa medición se decide la ventana de la Fase 3.
 
 ### Fase 3: el cambio real (de noche) · 3 a 4 horas
 
 1. Confirmar que no haya firmas en curso.
 2. Nuevo backup.
 3. Script de base con `COMMIT` y revisión de la foto de controles.
-4. Edge functions, **siempre con `--project-ref ejiycfqxgtrzaysgpzmx`** (`supabase/config.toml` apunta a BR).
+4. Edge functions, **una por una y por nombre** (`generate-pdf`, `compose-template-pdf`), siempre
+   con `--project-ref ejiycfqxgtrzaysgpzmx` (`supabase/config.toml` apunta a BR). **Nunca
+   `generate-base-pdf`** (ver §2) ni un `functions deploy` sin nombre.
 5. Push de `main` a `Sistemas-saa/prepaga-digital` (*fast-forward*).
 6. **Etiquetar la imagen actual del front** para el rollback.
-7. Construir la imagen nueva y recién después recrear el contenedor.
+7. Construir la imagen nueva y recién después recrear el contenedor:
+   `docker compose build --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) --build-arg GIT_BRANCH=main`.
+   El Dockerfile ya no cae a `npm install` si el lock no coincide: si falla ahí, se corrige el
+   lock en el repo, no en el servidor.
 8. Venta de prueba completa.
-9. Verificar con `build-version.json`, no mirando la UI (la PWA cachea).
+9. Verificar con `build-version.json`, no mirando la UI (la PWA cachea): `commit` tiene que
+   ser el SHA desplegado, no `unknown`.
 
 ### Fase 4: seguimiento · 1 a 2 días
 
@@ -225,6 +267,11 @@ Nunca se pasa por **front nuevo + base vieja**, que es lo único que rompería.
 | Una edge function | Ese PDF falla | Redesplegar la versión anterior |
 | El front nuevo | Pantallas con error | Volver a la imagen etiquetada (2 a 5 s) |
 | La base, después del `COMMIT` | — | Restaurar el backup. Sólo es necesario si el ensayo no atrapó algo |
+
+> **Probar la restauración en la Fase 1**, no descubrirla en la noche del pase: restaurar el
+> `pg_dump` en la copia, abrir una venta vieja y descargar su PDF firmado. Los PDFs viven en
+> Storage, que el `pg_dump` no incluye: después de restaurar la base, los `signed_pdf_url` tienen
+> que seguir resolviendo contra los mismos objetos (el pase no escribe ni borra en Storage).
 
 **Punto de no retorno:** cuando los usuarios empiezan a cargar datos con las funciones nuevas
 (anexos, nóminas). A partir de ahí, restaurar el backup perdería esos datos. Por eso la prueba
@@ -312,9 +359,10 @@ aplicado en prod. Una sentencia única es atómica en cualquier cliente.
 
 ```
 DO $pase_entrega_a$                       -- una sola sentencia: todo o nada
-  lock_timeout = 3s
-  0.a Precondiciones: aborta si ya está aplicado, o si la base no es BR prod
-  0.b Foto "antes" (esquema pe_scratch)
+  lock_timeout = 3s                       -- tope de ESPERA por bloqueo, no de duración
+  0.a Precondiciones: aborta si ya está aplicado, o si el esquema de public
+      no es EXACTAMENTE el aprobado (88 tablas, 969 columnas con su tipo)
+  0.b Foto "antes" (esquema pe_scratch): ctid+xmin de cada fila, columnas y tipos
   PASO 0 (A1)
   20260813000001 · 000002 · 000003 · 20260817000001 · 000002
   20260818000001 (A2) · 20260818000002 (A3) · 20260818000003
@@ -324,13 +372,33 @@ DO $pase_entrega_a$                       -- una sola sentencia: todo o nada
   20260909000001 · 000002 · 20260910000001 … 000004
   Verificación de objetos → guarda de datos → las 3 ventas conocidas
   Registro de las 24 versiones en supabase_migrations.schema_migrations
-  REAL: borra pe_scratch  ·  SIMULACRO: RAISE 'SIMULACRO OK' → se deshace todo
+  Mediciones: segundos con tablas bloqueadas, 3 pasos más lentos, estado de db push
+  REAL: borra pe_scratch, NOTICE con las mediciones
+  SIMULACRO: RAISE 'SIMULACRO OK … Tablas bloqueadas X s …' → se deshace todo
 ```
 
 Si algo falla, el mensaje termina en `[paso: <migración o paso>]`.
 
-> ⚠️ Las versiones excluidas (comisiones y `20260822000003`) **no** se registran en el historial.
-> Un `db push` futuro contra prod intentaría aplicarlas: comisiones necesita su propio pase.
+**Precondición de esquema (identifica el destino).** `scripts/produccion/esquema-prod-referencia.txt`
+tiene el esquema de `public` de prod capturado el 2026-11-02 (88 tablas, 969 columnas con su tipo)
+y el generador verifica su md5 contra el medido en prod, así que no hay error de transcripción
+posible. El script compara la base destino contra esa lista y aborta ante **una sola** columna
+de más, de menos o con otro tipo, nombrando las primeras 10. US test aborta (le faltan y le
+sobran decenas); una copia restaurada de prod pasa, que es lo que necesita el ensayo. Si prod
+cambia antes del pase (p. ej. un deploy de Lovable que agrega una columna), el script aborta:
+revisar el cambio, recapturar con `scripts/produccion/esquema-prod-referencia.sql` (sólo lectura),
+actualizar el md5 en el generador y volver a generar.
+
+> ⚠️ **`db push` contra prod.** Las versiones excluidas (comisiones y `20260822000003`) **no** se
+> registran en el historial, así que un `db push` las aplicaría. **Hoy no puede pasar**: el
+> historial de prod tiene **89 versiones sin archivo en el repo** (relevado el 2026-11-02, sólo
+> lectura), y con eso la CLI se niega a hacer push (*"Remote migration versions not found in local
+> migrations directory"*). El pase no cambia eso, y el script lo informa al terminar
+> (`db push: BLOQUEADO …`). **Lo único que lo destrabaría es un `supabase migration repair`**, que
+> es justo lo que la CLI sugiere en ese error: **no correrlo nunca contra BR**. Y ojo: este repo
+> está **linkeado a BR** (`supabase/.temp/project-ref` = `ejiycfqxgtrzaysgpzmx`), así que
+> cualquier comando de la CLI sin `--project-ref` va a prod. Recomendado en cada máquina:
+> `npx supabase unlink`.
 
 ### Guarda de datos (paso 8): prueba que ninguna fila existente cambió
 
@@ -348,15 +416,28 @@ conteo **y un md5 de las columnas que existían antes**:
 
 Si cualquier fila no da, el script aborta y prod queda exactamente como estaba.
 
-> **Implementación real** (más fuerte que la tabla de arriba): la huella cubre las **88 tablas de
-> `public`** y **todas** sus columnas preexistentes. Los valores de más de 2000 bytes (PDF en
-> base64, HTML, `old/new_values` de auditoría, que viven en TOAST) entran por su tamaño almacenado,
-> que se lee sin descomprimirlos: así cada foto lee ~30 MB y no ~1 GB. Medido en prod con la misma
-> consulta en modo lectura: **4,5 s por foto**, 0 tablas sin permiso de lectura.
+> **Implementación real (2026-11-02), más fuerte que la tabla de arriba.** La huella de cada una
+> de las **88 tablas** es el conteo más un md5 de la **identidad física de cada fila**: `ctid`
+> (dónde está esa versión de la fila) y `xmin` (qué transacción la escribió). Más la lista de
+> columnas preexistentes con su tipo.
 >
-> **Efecto en los usuarios**: la segunda foto corre con las tablas ya bloqueadas, así que durante
-> esos ~5 s las escrituras sobre `sales`/`beneficiaries`/`clients`/`templates` **esperan** (no
-> fallan). De noche, sin firmas en curso.
+> Por qué alcanza sin mirar el contenido: en Postgres **no hay forma de cambiar una fila sin
+> escribir una versión nueva**, con otro `ctid` y el `xmin` de esta transacción. Así que la huella
+> cambia ante un `UPDATE` (aunque deje los mismos valores), un `DELETE`, un `INSERT`, o una
+> reescritura de tabla, sea cual sea el tamaño del valor. Un `VACUUM` concurrente no la cambia: no
+> mueve filas vivas y conserva el `xmin` original al congelarlas. Lo único que cambia datos sin
+> escribir filas es el DDL (`DROP COLUMN`, `RENAME`, cambio de tipo): eso lo atrapa la lista de
+> columnas.
+>
+> **Por qué se cambió.** La versión del 2026-10-25 hacía md5 del contenido, pero los valores de más
+> de 2000 bytes (PDF en base64, HTML) entraban sólo por su tamaño almacenado: un cambio de contenido
+> que conservara el tamaño pasaba sin detectarse. El ensayo lo demuestra: reemplazar texto en el
+> contrato firmado del mock deja `pg_column_size` en 270 → 270, y la guarda nueva lo atrapa.
+> Señalado por la revisión externa del 2026-11-02.
+>
+> **Costo**: medido en prod en modo lectura, **0,08 s las 88 tablas** (38.025 filas), contra 4,5 s
+> de la versión anterior. Como la segunda foto corre con las tablas ya bloqueadas, esto también
+> acorta la ventana de bloqueo.
 >
 > **Falsos positivos posibles**: si un usuario o un cron escribe en cualquier tabla entre las dos
 > fotos, la guarda aborta. No se aplica nada, y se vuelve a correr. Los crons de prod corren a los
@@ -370,15 +451,18 @@ por nombre; 0 nombres duplicados; 0 avisos de vencimiento previos; 0 ventas-oper
 ninguna de las 24 versiones ya registrada; las firmadas fuera de fórmula son **exactamente** las 3
 conocidas, y las abiertas fuera de fórmula son 0; sin transacciones largas.
 
-**Ensayo en PGlite** (`scripts/produccion/ensayo/run.mjs`; es PG 18, prod es 17): 28/28 OK.
+**Ensayo en PGlite** (`scripts/produccion/ensayo/run.mjs`; es PG 18, prod es 17): TODO OK
+(actualizado el 2026-11-02).
 
 | Caso | Resultado |
 |---|---|
-| SIMULACRO | Termina en `SIMULACRO OK`, y la base queda idéntica fila por fila: sin tablas, columnas ni esquema residual |
+| Esquema distinto | Con la referencia de prod, la base del mock aborta en la precondición sin aplicar nada. Una **sola** columna de más (`clients.columna_que_prod_no_tiene`) también aborta, y el mensaje la nombra |
+| SIMULACRO | Termina en `SIMULACRO OK`, y la base queda idéntica fila por fila: sin tablas, columnas ni esquema residual. Informa la ventana de bloqueo (0,13 s en PGlite), los pasos más lentos y `db push: BLOQUEADO` |
 | REAL | Todas las tablas preexistentes idénticas (comparadas por separado, no con la huella del script); totales sin cambio; `audit_logs` no crece; +10 plantillas inactivas; job agendado; 24 versiones registradas |
 | Después del REAL | El guard frena editar un adherente de una venta completada; un alta en borrador recalcula `titular + adherentes`; una fila de baja (`inactive` + `coverage_end_date`) se inserta y no suma; la numeración sigue en `2026-000301` |
 | Segunda corrida | Aborta en la precondición |
-| Sabotajes inyectados | `UPDATE` con **los mismos valores** sobre una venta; nombre pasado a minúscula; `DELETE` de una notificación; plantilla sembrada activa. **Los cuatro abortan por la guarda**, y no queda nada aplicado |
+| Sabotajes inyectados | `UPDATE` con **los mismos valores** sobre una venta; nombre pasado a minúscula; `DELETE` de una notificación; **contenido del contrato firmado cambiado conservando longitud y tamaño almacenado**; **`DROP COLUMN`** de una columna preexistente; plantilla sembrada activa. **Los seis abortan por la guarda**, y no queda nada aplicado |
+| Reescritura de tablas | Ninguna de las 24 migraciones reescribe una tabla existente: si lo hiciera, el pase REAL abortaría por la guarda (cambia el `ctid` de todas las filas) |
 
 ### Secuencia completa
 
@@ -388,7 +472,8 @@ conocidas, y las abiertas fuera de fórmula son 0; sin transacciones largas.
    Probar a propósito una **baja** (valida A1) y una **edición de adherente en una venta
    completada** (tiene que dar el error del guard).
 3. **Simulacro sobre prod**: `sql/produccion-entrega-a-SIMULACRO.sql`. El resultado correcto es
-   el error `SIMULACRO OK`. Después, confirmar por lectura que no quedó nada:
+   el error `SIMULACRO OK`. Anotar `Tablas bloqueadas X s`: es lo que van a esperar los usuarios
+   en el cambio real. Después, confirmar por lectura que no quedó nada:
    `SELECT to_regclass('public.adherent_incorporations')` tiene que dar `NULL`.
 4. **Cambio real** (Fase 3): backup → `sql/produccion-entrega-a.sql` → edge functions → front.
 5. **Recién con el front nuevo arriba**: activar las 10 plantillas (A5):
@@ -409,3 +494,26 @@ Las 3 ventas de A2 quedan con su total actual. Pero si algún día se firma un *
 sobre una de ellas**, la activación recalcula el contrato madre con la fórmula nueva y **el total
 salta al doble en ese momento**. Hay que decidir el total correcto de esas 3 **antes** de habilitar
 Movimientos, o como mínimo antes de cargar un anexo sobre ellas.
+
+---
+
+## 12. Revisión externa del 2026-11-02 y qué se cambió
+
+Una revisión estática del plan (sobre `6ea7ecc`) concluyó que el pase es viable pero no estaba
+listo. Estado de cada punto:
+
+| Punto de la revisión | Estado |
+|---|---|
+| El script no identifica la base destino | **Resuelto**: precondición de esquema contra la referencia aprobada (§11) |
+| La guarda no detecta cambios de contenido grande que conserven el tamaño | **Resuelto**: guarda por `ctid` + `xmin` + columnas, con sabotaje que lo prueba (§11) |
+| Los "2 a 5 s" de bloqueo no estaban demostrados; `lock_timeout` no limita la retención | **Corregido**: la afirmación estaba mal (el bloqueo frena también lecturas y dura del PASO 0 al final). El script ahora **mide** la ventana; se decide con el número del SIMULACRO (§5, Fase 2) |
+| Un front de ensayo podría apuntar a prod | **Procedimiento**: `vite dev` + `.env.local` contra la copia y verificación en Network antes de loguearse; aislar WAHA/crons de la copia (Fase 1). No se tocó `client.ts` |
+| `db push` accidental aplicaría lo excluido | **Verificado que hoy está bloqueado** (89 versiones remotas sin archivo); el script lo informa; regla: nunca `migration repair` contra BR, `supabase unlink` local (§11) |
+| `generate-base-pdf` difiere entre `main` y la rama | **Aclarado**: el lado roto es `main`; queda excluida del pase por escrito (§2, Fase 3) |
+| Dockerfile con fallback a `npm install`; `build-version.json` con commit `unknown` | **Resuelto**: sólo `npm ci` (lock verificado en sincronía con npm 10) y build-args `GIT_COMMIT`/`GIT_BRANCH` |
+| Rollback: el backup no incluye Storage | **Documentado**: el pase no toca Storage; probar la restauración en la Fase 1 (§8) |
+| Sin CI; pruebas funcionales pendientes (WhatsApp, OTP, descarga, nómina) | **Abierto**: el repo no tiene workflows. Antes de la decisión de prod: build + typecheck + ensayo PGlite sobre el commit exacto, y el recorrido funcional completo en la copia (Fase 1) |
+| Las 3 ventas con total fuera de fórmula | **Abierto**: decisión de negocio, o no cargar anexos sobre ellas hasta decidir (§11) |
+
+La recomendación de la revisión se mantiene: **preparación y ensayo sobre una copia aislada**, y
+recién después una decisión de producción separada.

@@ -5,7 +5,9 @@
 -- cambiar la migracion o el generador y volver a generar.
 --
 -- Proyecto destino: ejiycfqxgtrzaysgpzmx (BR prod) o una COPIA de prod para el
--- ensayo. Aborta solo si ve que ya se aplico o que la base no es prod.
+-- ensayo. Aborta solo si ve que ya se aplico, o si el esquema de public no es
+-- EXACTAMENTE el aprobado (scripts/produccion/esquema-prod-referencia.txt:
+-- 88 tablas, 969 columnas con su tipo).
 --
 -- Como correrlo: pegar el archivo ENTERO en el SQL Editor, o psql -f.
 --
@@ -19,11 +21,18 @@
 -- Garantias (ver docs/runbooks/produccion-entrega-a.md, seccion 11):
 --   * Atomico: o se aplica todo, o nada.
 --   * Cero UPDATE/DELETE sobre filas existentes. Ajustes A1-A7 aplicados.
---   * Guarda de datos: antes de tocar nada saca una huella (conteo + md5 de
---     todas las columnas) de CADA tabla de public, y al final la compara. Si una
---     sola fila preexistente cambio, se borro o aparecio de mas, ABORTA.
---   * lock_timeout de 3 s: si una tabla esta en uso, se cancela en vez de
---     dejar a los usuarios esperando.
+--   * Guarda de datos: antes de tocar nada guarda, de CADA tabla de public, la
+--     identidad fisica de cada fila (ctid + xmin) y las columnas con su tipo; al
+--     final lo compara. Todo UPDATE —aunque deje los mismos valores—, DELETE,
+--     INSERT o reescritura de tabla crea otra version de fila con otro ctid y
+--     otro xmin, asi que si UNA sola fila preexistente fue escrita, ABORTA. No
+--     depende del contenido: cubre igual un PDF de 2 MB que un booleano.
+--   * Bloqueo: lock_timeout de 3 s limita cuanto se ESPERA para conseguir un
+--     bloqueo, no cuanto se lo retiene. Desde el PASO 0 hasta el final, las
+--     tablas alteradas (beneficiaries, sales, clients, ...) quedan bloqueadas
+--     para lectura y escritura. El script informa esa duracion al terminar
+--     (en el mensaje del SIMULACRO y como NOTICE en el real): medirla en el
+--     ensayo y en el simulacro antes de elegir la ventana.
 --
 -- Si aborta por la guarda nombrando una tabla que el pase no toca (p. ej.
 -- signature_links), es actividad concurrente de un usuario o de un cron entre
@@ -33,17 +42,29 @@
 
 DO $pase_entrega_a$
 DECLARE
-  v_paso       text := 'inicio';
-  v_tablas     bigint;
-  v_plantillas bigint;
+  v_paso        text := 'inicio';
+  v_tablas      bigint;
+  v_plantillas  bigint;
+  v_t_inicio    timestamptz := clock_timestamp();
+  v_t_bloqueo   timestamptz;
+  v_t           timestamptz;
+  v_nombres     text[] := '{}';
+  v_duraciones  numeric[] := '{}';
+  v_bloqueo     numeric;
+  v_total       numeric;
+  v_lentos      text;
+  v_sin_archivo bigint;
+  v_medicion    text;
 BEGIN
-  -- Si una tabla esta en uso, cancelar en vez de hacer esperar a los usuarios.
+  -- Tope de ESPERA para conseguir cada bloqueo (no de retencion): si una tabla
+  -- esta en uso, se cancela todo en vez de encolar a los usuarios detras.
   PERFORM set_config('lock_timeout', '3s', true);
 
   -- ##########################################################################
   -- 0.a precondiciones
   -- ##########################################################################
   v_paso := '0.a precondiciones';
+  v_t := clock_timestamp();
   EXECUTE $pase_00$
 -- 0.a Precondiciones: que sea prod y que el pase no se haya aplicado
 DO $pre$
@@ -59,59 +80,1056 @@ BEGIN
   END IF;
 END
 $pre$;
+
+-- 0.a' El esquema de public tiene que ser EXACTAMENTE el aprobado: mismas
+-- tablas, mismas columnas, mismos tipos. Identifica al destino (BR prod o una
+-- copia restaurada) y garantiza que las migraciones corren sobre lo que se
+-- ensayo. Si prod cambio desde la captura, revisar y recapturar la referencia.
+DO $esquema$
+DECLARE
+  v_ref    text[] := string_to_array($esquema_ref$audit_comments.audit_action:text
+audit_comments.comment:text
+audit_comments.created_at:timestamp with time zone
+audit_comments.id:uuid
+audit_comments.sale_id:uuid
+audit_comments.sale_status_at_comment:text
+audit_comments.updated_at:timestamp with time zone
+audit_comments.user_id:uuid
+audit_logs.action:character varying(100)
+audit_logs.company_id:uuid
+audit_logs.created_at:timestamp with time zone
+audit_logs.entity_id:uuid
+audit_logs.entity_type:character varying(100)
+audit_logs.id:uuid
+audit_logs.ip_address:character varying(45)
+audit_logs.new_values:jsonb
+audit_logs.old_values:jsonb
+audit_logs.user_agent:text
+audit_logs.user_id:uuid
+audit_processes.auditor_id:uuid
+audit_processes.completed_at:timestamp with time zone
+audit_processes.created_at:timestamp with time zone
+audit_processes.id:uuid
+audit_processes.notes:text
+audit_processes.sale_id:uuid
+audit_processes.started_at:timestamp with time zone
+audit_processes.status:character varying(50)
+auth_attempts.company_id:uuid
+auth_attempts.created_at:timestamp with time zone
+auth_attempts.email:character varying(255)
+auth_attempts.failure_reason:character varying(255)
+auth_attempts.id:uuid
+auth_attempts.ip_address:character varying(45)
+auth_attempts.success:boolean
+auth_attempts.user_agent:text
+available_permissions.category:text
+available_permissions.created_at:timestamp with time zone
+available_permissions.description:text
+available_permissions.id:uuid
+available_permissions.is_active:boolean
+available_permissions.permission_key:text
+available_permissions.permission_name:text
+beneficiaries.address:text
+beneficiaries.amount:numeric(12,2)
+beneficiaries.barrio:character varying
+beneficiaries.birth_date:date
+beneficiaries.city:character varying
+beneficiaries.created_at:timestamp with time zone
+beneficiaries.dni:character varying(20)
+beneficiaries.document_number:character varying
+beneficiaries.document_type:character varying
+beneficiaries.email:character varying(255)
+beneficiaries.first_name:character varying(100)
+beneficiaries.gender:character varying
+beneficiaries.has_preexisting_conditions:boolean
+beneficiaries.id:uuid
+beneficiaries.is_primary:boolean
+beneficiaries.last_name:character varying(100)
+beneficiaries.marital_status:character varying
+beneficiaries.occupation:character varying
+beneficiaries.phone:character varying(50)
+beneficiaries.postal_code:character varying
+beneficiaries.preexisting_conditions_detail:text
+beneficiaries.province:character varying
+beneficiaries.relationship:character varying(50)
+beneficiaries.sale_id:uuid
+beneficiaries.signature_link_id:uuid
+beneficiaries.signature_required:boolean
+beneficiary_documents.beneficiary_id:uuid
+beneficiary_documents.created_at:timestamp with time zone
+beneficiary_documents.document_type_id:uuid
+beneficiary_documents.file_name:character varying
+beneficiary_documents.file_size:integer
+beneficiary_documents.file_type:character varying
+beneficiary_documents.file_url:text
+beneficiary_documents.id:uuid
+beneficiary_documents.is_verified:boolean
+beneficiary_documents.upload_source:character varying
+beneficiary_documents.uploaded_by:uuid
+beneficiary_documents.verified_at:timestamp with time zone
+beneficiary_documents.verified_by:uuid
+clients.address:text
+clients.barrio:character varying(100)
+clients.birth_date:date
+clients.city:character varying(100)
+clients.company_id:uuid
+clients.country_id:uuid
+clients.created_at:timestamp with time zone
+clients.dni:character varying(20)
+clients.email:character varying(255)
+clients.first_name:character varying(100)
+clients.gender:character varying(20)
+clients.id:uuid
+clients.is_active:boolean
+clients.last_name:character varying(100)
+clients.marital_status:character varying(30)
+clients.notes:text
+clients.phone:character varying(50)
+clients.postal_code:character varying(20)
+clients.province:character varying(100)
+clients.updated_at:timestamp with time zone
+communication_logs.channel:character varying(50)
+communication_logs.client_id:uuid
+communication_logs.company_id:uuid
+communication_logs.content:text
+communication_logs.created_at:timestamp with time zone
+communication_logs.direction:character varying(20)
+communication_logs.id:uuid
+communication_logs.sale_id:uuid
+communication_logs.sent_at:timestamp with time zone
+communication_logs.status:character varying(50)
+communication_logs.subject:character varying(255)
+companies.accent_color:text
+companies.address:text
+companies.border_radius:text
+companies.created_at:timestamp with time zone
+companies.custom_css:text
+companies.dark_mode:boolean
+companies.email:character varying(255)
+companies.favicon:text
+companies.font_family:text
+companies.id:uuid
+companies.is_active:boolean
+companies.login_background_url:text
+companies.login_logo_url:text
+companies.logo_url:text
+companies.name:character varying(255)
+companies.phone:character varying(50)
+companies.primary_color:character varying(7)
+companies.secondary_color:character varying(7)
+companies.shadows:boolean
+companies.tax_id:character varying(50)
+companies.updated_at:timestamp with time zone
+companies.website:character varying(255)
+company_currency_settings.company_id:uuid
+company_currency_settings.created_at:timestamp with time zone
+company_currency_settings.currency_code:character varying(3)
+company_currency_settings.currency_symbol:character varying(5)
+company_currency_settings.decimal_places:integer
+company_currency_settings.decimal_separator:character varying(1)
+company_currency_settings.id:uuid
+company_currency_settings.thousand_separator:character varying(1)
+company_otp_policy.allowed_channels:jsonb
+company_otp_policy.company_id:uuid
+company_otp_policy.created_at:timestamp with time zone
+company_otp_policy.default_channel:text
+company_otp_policy.id:uuid
+company_otp_policy.max_attempts:integer
+company_otp_policy.otp_expiration_seconds:integer
+company_otp_policy.otp_length:integer
+company_otp_policy.otp_use_signature_whatsapp:boolean
+company_otp_policy.otp_whatsapp_gateway_url:text
+company_otp_policy.otp_whatsapp_provider:text
+company_otp_policy.require_otp_for_signature:boolean
+company_otp_policy.smtp_from_address:text
+company_otp_policy.smtp_from_name:text
+company_otp_policy.smtp_host:text
+company_otp_policy.smtp_password_encrypted:text
+company_otp_policy.smtp_port:integer
+company_otp_policy.smtp_relay_url:text
+company_otp_policy.smtp_tls:boolean
+company_otp_policy.smtp_user:text
+company_otp_policy.updated_at:timestamp with time zone
+company_otp_policy.whatsapp_otp_enabled:boolean
+company_settings.company_id:uuid
+company_settings.contratada_auto_whatsapp:boolean
+company_settings.contratada_signature_mode:text
+company_settings.contratada_signer_dni:text
+company_settings.contratada_signer_email:text
+company_settings.contratada_signer_name:text
+company_settings.contratada_signer_phone:text
+company_settings.created_at:timestamp with time zone
+company_settings.email_api_key:text
+company_settings.email_from_address:character varying(255)
+company_settings.email_from_name:character varying(255)
+company_settings.email_provider:text
+company_settings.id:uuid
+company_settings.menu_config:jsonb
+company_settings.pdf_footer_base64:text
+company_settings.pdf_footer_image_url:text
+company_settings.pdf_header_image_url:text
+company_settings.pdf_logo_base64:text
+company_settings.pdf_tagline_base64:text
+company_settings.signature_block_style:jsonb
+company_settings.signwell_api_key:text
+company_settings.signwell_enabled:boolean
+company_settings.sms_api_key:text
+company_settings.sms_sender_id:text
+company_settings.twilio_account_sid:text
+company_settings.twilio_auth_token:text
+company_settings.twilio_whatsapp_number:text
+company_settings.updated_at:timestamp with time zone
+company_settings.whatsapp_api_key:text
+company_settings.whatsapp_gateway_url:text
+company_settings.whatsapp_linked_phone:text
+company_settings.whatsapp_phone_id:text
+company_settings.whatsapp_provider:text
+company_ui_settings.analytics_config:jsonb
+company_ui_settings.company_id:uuid
+company_ui_settings.created_at:timestamp with time zone
+company_ui_settings.dashboard_layout:jsonb
+company_ui_settings.id:uuid
+company_ui_settings.sale_progress_config:jsonb
+company_ui_settings.sidebar_collapsed:boolean
+company_ui_settings.theme:character varying(20)
+company_ui_settings.updated_at:timestamp with time zone
+company_workflow_config.company_id:uuid
+company_workflow_config.created_at:timestamp with time zone
+company_workflow_config.id:uuid
+company_workflow_config.is_active:boolean
+company_workflow_config.updated_at:timestamp with time zone
+company_workflow_config.updated_by:uuid
+company_workflow_config.workflow_config:jsonb
+countries.code:character varying(3)
+countries.created_at:timestamp with time zone
+countries.id:uuid
+countries.name:character varying(100)
+countries.phone_code:character varying(10)
+dashboard_widgets.config:jsonb
+dashboard_widgets.created_at:timestamp with time zone
+dashboard_widgets.id:uuid
+dashboard_widgets.is_visible:boolean
+dashboard_widgets.position:integer
+dashboard_widgets.updated_at:timestamp with time zone
+dashboard_widgets.user_id:uuid
+dashboard_widgets.widget_type:character varying(100)
+debt_plans.created_at:timestamp with time zone
+debt_plans.estimated_interest:numeric(14,2)
+debt_plans.estimated_months:integer
+debt_plans.id:uuid
+debt_plans.plan_data:jsonb
+debt_plans.scenario_id:uuid
+debt_plans.strategy:text
+debt_plans.total_debt:numeric(14,2)
+debt_plans.updated_at:timestamp with time zone
+debt_plans.user_id:uuid
+debt_scenarios.created_at:timestamp with time zone
+debt_scenarios.extra_monthly_payment:numeric(14,2)
+debt_scenarios.id:uuid
+debt_scenarios.name:text
+debt_scenarios.strategy:text
+debt_scenarios.updated_at:timestamp with time zone
+debt_scenarios.user_id:uuid
+debts.created_at:timestamp with time zone
+debts.creditor:text
+debts.current_balance:numeric(14,2)
+debts.debt_type:text
+debts.due_date:date
+debts.id:uuid
+debts.interest_rate:numeric(7,4)
+debts.minimum_payment:numeric(14,2)
+debts.name:text
+debts.original_amount:numeric(14,2)
+debts.status:text
+debts.updated_at:timestamp with time zone
+debts.user_id:uuid
+document_access_logs.access_type:character varying(50)
+document_access_logs.created_at:timestamp with time zone
+document_access_logs.document_id:uuid
+document_access_logs.id:uuid
+document_access_logs.ip_address:character varying(45)
+document_access_logs.user_id:uuid
+document_field_values.completed_at:timestamp with time zone
+document_field_values.created_at:timestamp with time zone
+document_field_values.field_id:uuid
+document_field_values.id:uuid
+document_field_values.signature_link_id:uuid
+document_field_values.value_json:jsonb
+document_field_values.value_text:text
+document_fields.created_at:timestamp with time zone
+document_fields.document_id:uuid
+document_fields.field_type:text
+document_fields.h:numeric
+document_fields.id:uuid
+document_fields.label:text
+document_fields.meta:jsonb
+document_fields.page:integer
+document_fields.required:boolean
+document_fields.signer_role:text
+document_fields.w:numeric
+document_fields.x:numeric
+document_fields.y:numeric
+document_package_items.created_at:timestamp with time zone
+document_package_items.document_id:uuid
+document_package_items.id:uuid
+document_package_items.is_required:boolean
+document_package_items.package_id:uuid
+document_package_items.sort_order:integer
+document_packages.created_at:timestamp with time zone
+document_packages.created_by:uuid
+document_packages.description:text
+document_packages.id:uuid
+document_packages.name:character varying
+document_packages.package_type:character varying
+document_packages.sale_id:uuid
+document_packages.updated_at:timestamp with time zone
+document_print_versions.created_at:timestamp with time zone
+document_print_versions.document_id:uuid
+document_print_versions.generated_by:uuid
+document_print_versions.id:uuid
+document_print_versions.is_current:boolean
+document_print_versions.pdf_hash:text
+document_print_versions.pdf_url:text
+document_print_versions.reason:text
+document_print_versions.sale_id:uuid
+document_print_versions.version_number:integer
+document_types.applies_to:character varying
+document_types.code:character varying
+document_types.created_at:timestamp with time zone
+document_types.description:text
+document_types.id:uuid
+document_types.is_active:boolean
+document_types.is_required:boolean
+document_types.name:character varying
+document_types.requires_signature:boolean
+document_types.sort_order:integer
+document_types.template_id:uuid
+document_types.updated_at:timestamp with time zone
+documents.base_pdf_hash:text
+documents.base_pdf_url:text
+documents.beneficiary_id:uuid
+documents.content:text
+documents.created_at:timestamp with time zone
+documents.document_type:character varying(50)
+documents.document_type_id:uuid
+documents.evidence_certificate_hash:text
+documents.evidence_certificate_url:text
+documents.file_url:text
+documents.generated_from_template:boolean
+documents.id:uuid
+documents.is_final:boolean
+documents.latest_print_pdf_at:timestamp with time zone
+documents.latest_print_pdf_url:text
+documents.name:character varying(255)
+documents.requires_signature:boolean
+documents.sale_id:uuid
+documents.signature_data:text
+documents.signed_at:timestamp with time zone
+documents.signed_by:uuid
+documents.signed_pdf_hash:text
+documents.signed_pdf_url:text
+documents.status:document_status
+documents.template_designer_version:text
+documents.template_version_id:uuid
+documents.updated_at:timestamp with time zone
+documents.version:integer
+documents_backup_20260820.backed_up_at:timestamp with time zone
+documents_backup_20260820.base_pdf_hash:text
+documents_backup_20260820.base_pdf_url:text
+documents_backup_20260820.beneficiary_id:uuid
+documents_backup_20260820.content:text
+documents_backup_20260820.created_at:timestamp with time zone
+documents_backup_20260820.document_type:character varying(50)
+documents_backup_20260820.document_type_id:uuid
+documents_backup_20260820.evidence_certificate_hash:text
+documents_backup_20260820.evidence_certificate_url:text
+documents_backup_20260820.file_url:text
+documents_backup_20260820.generated_from_template:boolean
+documents_backup_20260820.id:uuid
+documents_backup_20260820.is_final:boolean
+documents_backup_20260820.latest_print_pdf_at:timestamp with time zone
+documents_backup_20260820.latest_print_pdf_url:text
+documents_backup_20260820.name:character varying(255)
+documents_backup_20260820.requires_signature:boolean
+documents_backup_20260820.sale_id:uuid
+documents_backup_20260820.signature_data:text
+documents_backup_20260820.signed_at:timestamp with time zone
+documents_backup_20260820.signed_by:uuid
+documents_backup_20260820.signed_pdf_hash:text
+documents_backup_20260820.signed_pdf_url:text
+documents_backup_20260820.status:document_status
+documents_backup_20260820.template_designer_version:text
+documents_backup_20260820.template_version_id:uuid
+documents_backup_20260820.updated_at:timestamp with time zone
+documents_backup_20260820.version:integer
+email_campaigns.clicked_count:integer
+email_campaigns.company_id:uuid
+email_campaigns.created_at:timestamp with time zone
+email_campaigns.id:uuid
+email_campaigns.name:character varying(255)
+email_campaigns.opened_count:integer
+email_campaigns.scheduled_at:timestamp with time zone
+email_campaigns.sent_at:timestamp with time zone
+email_campaigns.sent_count:integer
+email_campaigns.status:character varying(50)
+email_campaigns.subject:character varying(255)
+email_campaigns.template_id:uuid
+email_templates.body:text
+email_templates.channel:text
+email_templates.company_id:uuid
+email_templates.created_at:timestamp with time zone
+email_templates.id:uuid
+email_templates.is_active:boolean
+email_templates.name:character varying(255)
+email_templates.subject:character varying(255)
+email_templates.template_key:text
+email_templates.updated_at:timestamp with time zone
+file_uploads.company_id:uuid
+file_uploads.created_at:timestamp with time zone
+file_uploads.entity_id:uuid
+file_uploads.entity_type:character varying(100)
+file_uploads.file_name:character varying(255)
+file_uploads.file_size:integer
+file_uploads.file_type:character varying(100)
+file_uploads.file_url:text
+file_uploads.id:uuid
+file_uploads.uploaded_by:uuid
+hash_anchors.anchor_reference:text
+hash_anchors.anchor_type:text
+hash_anchors.anchored_at:timestamp with time zone
+hash_anchors.created_at:timestamp with time zone
+hash_anchors.evidence_bundle_id:uuid
+hash_anchors.hash_value:text
+hash_anchors.id:uuid
+incident_attachments.created_at:timestamp with time zone
+incident_attachments.file_name:text
+incident_attachments.file_size:bigint
+incident_attachments.file_type:text
+incident_attachments.file_url:text
+incident_attachments.id:uuid
+incident_attachments.incident_id:uuid
+incident_attachments.uploaded_by:uuid
+incident_comments.author_id:uuid
+incident_comments.content:text
+incident_comments.created_at:timestamp with time zone
+incident_comments.id:uuid
+incident_comments.incident_id:uuid
+incident_comments.is_internal:boolean
+incidents.analysis_notes:text
+incidents.assigned_to:uuid
+incidents.company_id:uuid
+incidents.created_at:timestamp with time zone
+incidents.description:text
+incidents.development_ended_at:timestamp with time zone
+incidents.development_started_at:timestamp with time zone
+incidents.estimated_hours:numeric(6,2)
+incidents.id:uuid
+incidents.module:text
+incidents.priority:text
+incidents.reported_by:uuid
+incidents.resolution_notes:text
+incidents.resolved_at:timestamp with time zone
+incidents.status:text
+incidents.title:text
+incidents.updated_at:timestamp with time zone
+information_requests.created_at:timestamp with time zone
+information_requests.description:text
+information_requests.id:uuid
+information_requests.request_type:character varying(100)
+information_requests.requested_by:uuid
+information_requests.responded_at:timestamp with time zone
+information_requests.response:text
+information_requests.sale_id:uuid
+information_requests.status:character varying(50)
+legal_evidence_certificates.certificate_hash:text
+legal_evidence_certificates.certificate_url:text
+legal_evidence_certificates.created_at:timestamp with time zone
+legal_evidence_certificates.document_id:uuid
+legal_evidence_certificates.id:uuid
+legal_evidence_certificates.payload:jsonb
+legal_evidence_certificates.sale_id:uuid
+legal_evidence_certificates.signature_link_id:uuid
+notifications.created_at:timestamp with time zone
+notifications.id:uuid
+notifications.is_read:boolean
+notifications.link:character varying(500)
+notifications.message:text
+notifications.title:character varying(255)
+notifications.type:character varying(50)
+notifications.user_id:uuid
+password_reset_tokens.created_at:timestamp with time zone
+password_reset_tokens.expires_at:timestamp with time zone
+password_reset_tokens.id:uuid
+password_reset_tokens.token:character varying(255)
+password_reset_tokens.used_at:timestamp with time zone
+password_reset_tokens.user_id:uuid
+payment_events.created_at:timestamp with time zone
+payment_events.event_type:text
+payment_events.id:uuid
+payment_events.payload:jsonb
+payment_events.payment_id:uuid
+payment_events.provider:text
+payments.amount:numeric(10,2)
+payments.checkout_url:text
+payments.created_at:timestamp with time zone
+payments.currency:text
+payments.id:uuid
+payments.metadata:jsonb
+payments.paddle_customer_id:text
+payments.paddle_subscription_id:text
+payments.paddle_transaction_id:text
+payments.product_id:uuid
+payments.provider:text
+payments.status:text
+payments.updated_at:timestamp with time zone
+payments.user_id:uuid
+pdf_reports.created_at:timestamp with time zone
+pdf_reports.file_url:text
+pdf_reports.id:uuid
+pdf_reports.payment_id:uuid
+pdf_reports.plan_id:uuid
+pdf_reports.report_type:text
+pdf_reports.user_id:uuid
+phone_migration_backup.column_name:text
+phone_migration_backup.id:bigint
+phone_migration_backup.migrated_at:timestamp with time zone
+phone_migration_backup.new_value:text
+phone_migration_backup.old_value:text
+phone_migration_backup.row_id:uuid
+phone_migration_backup.table_name:text
+plans.company_id:uuid
+plans.coverage_details:jsonb
+plans.created_at:timestamp with time zone
+plans.description:text
+plans.id:uuid
+plans.is_active:boolean
+plans.name:character varying(255)
+plans.price:numeric(12,2)
+plans.sort_order:integer
+plans.updated_at:timestamp with time zone
+process_traces.action:character varying(100)
+process_traces.created_at:timestamp with time zone
+process_traces.details:jsonb
+process_traces.id:uuid
+process_traces.sale_id:uuid
+process_traces.user_id:uuid
+products.active:boolean
+products.created_at:timestamp with time zone
+products.description:text
+products.duration_days:integer
+products.id:uuid
+products.name:text
+products.paddle_price_id:text
+products.paddle_product_id:text
+products.price_usd:numeric(10,2)
+products.type:text
+products.updated_at:timestamp with time zone
+profiles.avatar_url:text
+profiles.company_id:uuid
+profiles.created_at:timestamp with time zone
+profiles.email:character varying(255)
+profiles.first_name:character varying(100)
+profiles.full_name:text
+profiles.id:uuid
+profiles.is_active:boolean
+profiles.last_name:character varying(100)
+profiles.phone:character varying(50)
+profiles.updated_at:timestamp with time zone
+profiles.user_id:uuid
+rate_limit_log.count:integer
+rate_limit_log.id:bigint
+rate_limit_log.key:text
+rate_limit_log.updated_at:timestamp with time zone
+rate_limit_log.window_start:timestamp with time zone
+sale_documents.created_at:timestamp with time zone
+sale_documents.file_name:character varying(255)
+sale_documents.file_size:integer
+sale_documents.file_type:character varying(50)
+sale_documents.file_url:text
+sale_documents.id:uuid
+sale_documents.sale_id:uuid
+sale_documents.uploaded_by:uuid
+sale_notes.created_at:timestamp with time zone
+sale_notes.id:uuid
+sale_notes.is_internal:boolean
+sale_notes.note_text:text
+sale_notes.sale_id:uuid
+sale_notes.user_id:uuid
+sale_requirements.completed_at:timestamp with time zone
+sale_requirements.completed_by:uuid
+sale_requirements.created_at:timestamp with time zone
+sale_requirements.id:uuid
+sale_requirements.is_completed:boolean
+sale_requirements.requirement_text:text
+sale_requirements.sale_id:uuid
+sale_templates.created_at:timestamp with time zone
+sale_templates.id:uuid
+sale_templates.sale_id:uuid
+sale_templates.template_id:uuid
+sale_workflow_states.change_reason:text
+sale_workflow_states.changed_by:uuid
+sale_workflow_states.created_at:timestamp with time zone
+sale_workflow_states.id:uuid
+sale_workflow_states.metadata:jsonb
+sale_workflow_states.new_status:character varying
+sale_workflow_states.previous_status:character varying
+sale_workflow_states.sale_id:uuid
+sales.adherents_count:integer
+sales.all_signatures_completed:boolean
+sales.audit_notes:text
+sales.audit_status:character varying
+sales.audited_at:timestamp with time zone
+sales.auditor_id:uuid
+sales.billing_email:text
+sales.billing_phone:text
+sales.billing_razon_social:text
+sales.billing_ruc:text
+sales.client_id:uuid
+sales.company_id:uuid
+sales.contract_number:character varying
+sales.contract_pdf_url:text
+sales.contract_start_date:date
+sales.created_at:timestamp with time zone
+sales.id:uuid
+sales.immediate_coverage:boolean
+sales.notes:text
+sales.plan_id:uuid
+sales.request_number:character varying
+sales.requires_adherents:boolean
+sales.sale_date:date
+sales.sale_type:character varying
+sales.salesperson_id:uuid
+sales.signature_completed_at:timestamp with time zone
+sales.signature_expires_at:timestamp with time zone
+sales.signature_token:uuid
+sales.signed_at:timestamp with time zone
+sales.signed_ip:character varying(45)
+sales.signer_dni:character varying
+sales.signer_email:text
+sales.signer_name:character varying
+sales.signer_phone:text
+sales.signer_relationship:character varying
+sales.signer_type:character varying
+sales.status:sale_status
+sales.template_id:uuid
+sales.titular_amount:numeric(12,2)
+sales.total_amount:numeric(12,2)
+sales.updated_at:timestamp with time zone
+signature_consent_records.checkbox_state:boolean
+signature_consent_records.consent_text:text
+signature_consent_records.consent_text_version:text
+signature_consent_records.created_at:timestamp with time zone
+signature_consent_records.document_id:uuid
+signature_consent_records.id:uuid
+signature_consent_records.ip_address:text
+signature_consent_records.sale_id:uuid
+signature_consent_records.signature_link_id:uuid
+signature_consent_records.user_agent:text
+signature_events.consent_record_id:uuid
+signature_events.created_at:timestamp with time zone
+signature_events.document_hash:text
+signature_events.document_id:uuid
+signature_events.document_version:text
+signature_events.evidence_bundle_hash:text
+signature_events.evidence_bundle_url:text
+signature_events.id:uuid
+signature_events.identity_verification_id:uuid
+signature_events.identity_verified:boolean
+signature_events.ip_address:text
+signature_events.sale_id:uuid
+signature_events.signature_link_id:uuid
+signature_events.signature_method:text
+signature_events.signed_pdf_hash:text
+signature_events.timestamp:timestamp with time zone
+signature_events.user_agent:text
+signature_evidence_bundles.bundle_hash:text
+signature_evidence_bundles.consent_record_id:uuid
+signature_evidence_bundles.created_at:timestamp with time zone
+signature_evidence_bundles.document_hash:text
+signature_evidence_bundles.document_id:uuid
+signature_evidence_bundles.evidence_json:jsonb
+signature_evidence_bundles.id:uuid
+signature_evidence_bundles.identity_verification_id:uuid
+signature_evidence_bundles.identity_verified:boolean
+signature_evidence_bundles.ip_address:text
+signature_evidence_bundles.pdf_hash:text
+signature_evidence_bundles.sale_id:uuid
+signature_evidence_bundles.signature_event_id:uuid
+signature_evidence_bundles.signature_link_id:uuid
+signature_evidence_bundles.signature_method:text
+signature_evidence_bundles.storage_url:text
+signature_evidence_bundles.user_agent:text
+signature_identity_verification.attempts:integer
+signature_identity_verification.auth_method:text
+signature_identity_verification.channel:text
+signature_identity_verification.created_at:timestamp with time zone
+signature_identity_verification.destination_masked:text
+signature_identity_verification.expires_at:timestamp with time zone
+signature_identity_verification.id:uuid
+signature_identity_verification.ip_address:text
+signature_identity_verification.max_attempts:integer
+signature_identity_verification.otp_code_hash:text
+signature_identity_verification.result:text
+signature_identity_verification.sale_id:uuid
+signature_identity_verification.signature_link_id:uuid
+signature_identity_verification.user_agent:text
+signature_identity_verification.verified_at:timestamp with time zone
+signature_links.access_count:integer
+signature_links.accessed_at:timestamp with time zone
+signature_links.completed_at:timestamp with time zone
+signature_links.created_at:timestamp with time zone
+signature_links.created_by:uuid
+signature_links.expires_at:timestamp with time zone
+signature_links.id:uuid
+signature_links.ip_addresses:jsonb
+signature_links.is_active:boolean
+signature_links.package_id:uuid
+signature_links.recipient_email:character varying
+signature_links.recipient_id:uuid
+signature_links.recipient_name:text
+signature_links.recipient_phone:character varying
+signature_links.recipient_type:character varying
+signature_links.sale_id:uuid
+signature_links.signwell_document_id:text
+signature_links.signwell_signing_url:text
+signature_links.status:character varying
+signature_links.step_order:integer
+signature_links.token:character varying
+signature_links.updated_at:timestamp with time zone
+signature_policies.content:text
+signature_policies.created_at:timestamp with time zone
+signature_policies.id:uuid
+signature_policies.is_active:boolean
+signature_policies.title:text
+signature_policies.version:text
+signature_workflow_steps.completed_at:timestamp with time zone
+signature_workflow_steps.created_at:timestamp with time zone
+signature_workflow_steps.data:jsonb
+signature_workflow_steps.document_id:uuid
+signature_workflow_steps.id:uuid
+signature_workflow_steps.signature_link_id:uuid
+signature_workflow_steps.started_at:timestamp with time zone
+signature_workflow_steps.status:character varying
+signature_workflow_steps.step_order:integer
+signature_workflow_steps.step_type:character varying
+signatures.created_at:timestamp with time zone
+signatures.document_id:uuid
+signatures.id:uuid
+signatures.sale_id:uuid
+signatures.signature_data:text
+signatures.signed_at:timestamp with time zone
+signatures.signer_email:character varying(255)
+signatures.signer_ip:character varying(45)
+signatures.signer_name:character varying(255)
+sms_campaigns.company_id:uuid
+sms_campaigns.created_at:timestamp with time zone
+sms_campaigns.id:uuid
+sms_campaigns.message:text
+sms_campaigns.name:character varying(255)
+sms_campaigns.scheduled_at:timestamp with time zone
+sms_campaigns.sent_at:timestamp with time zone
+sms_campaigns.sent_count:integer
+sms_campaigns.status:character varying(50)
+subscriptions.cancel_at_period_end:boolean
+subscriptions.created_at:timestamp with time zone
+subscriptions.current_period_end:timestamp with time zone
+subscriptions.current_period_start:timestamp with time zone
+subscriptions.id:uuid
+subscriptions.paddle_customer_id:text
+subscriptions.paddle_subscription_id:text
+subscriptions.product_id:uuid
+subscriptions.provider:text
+subscriptions.status:text
+subscriptions.updated_at:timestamp with time zone
+subscriptions.user_id:uuid
+template_analytics.avg_completion_time:integer
+template_analytics.completions_count:integer
+template_analytics.created_at:timestamp with time zone
+template_analytics.id:uuid
+template_analytics.last_used_at:timestamp with time zone
+template_analytics.template_id:uuid
+template_analytics.updated_at:timestamp with time zone
+template_analytics.views_count:integer
+template_asset_pages.asset_id:uuid
+template_asset_pages.created_at:timestamp with time zone
+template_asset_pages.height:numeric
+template_asset_pages.id:uuid
+template_asset_pages.page_number:integer
+template_asset_pages.preview_image_url:text
+template_asset_pages.width:numeric
+template_assets.asset_type:text
+template_assets.converted_asset_id:uuid
+template_assets.created_at:timestamp with time zone
+template_assets.file_name:text
+template_assets.file_size:bigint
+template_assets.file_url:text
+template_assets.id:uuid
+template_assets.metadata:jsonb
+template_assets.mime_type:text
+template_assets.page_count:integer
+template_assets.processing_error:text
+template_assets.processing_progress:integer
+template_assets.status:text
+template_assets.template_id:uuid
+template_attachments.created_at:timestamp with time zone
+template_attachments.file_name:text
+template_attachments.file_size:integer
+template_attachments.file_type:text
+template_attachments.file_url:text
+template_attachments.id:uuid
+template_attachments.sort_order:integer
+template_attachments.template_id:uuid
+template_blocks.block_type:text
+template_blocks.content:jsonb
+template_blocks.created_at:timestamp with time zone
+template_blocks.h:numeric
+template_blocks.id:uuid
+template_blocks.is_locked:boolean
+template_blocks.is_visible:boolean
+template_blocks.page:integer
+template_blocks.rotation:numeric
+template_blocks.sort_order:integer
+template_blocks.style:jsonb
+template_blocks.template_id:uuid
+template_blocks.updated_at:timestamp with time zone
+template_blocks.visibility_rules:jsonb
+template_blocks.w:numeric
+template_blocks.x:numeric
+template_blocks.y:numeric
+template_blocks.z_index:integer
+template_comments.comment_text:text
+template_comments.created_at:timestamp with time zone
+template_comments.id:uuid
+template_comments.template_id:uuid
+template_comments.user_id:uuid
+template_fields.block_id:uuid
+template_fields.created_at:timestamp with time zone
+template_fields.field_type:text
+template_fields.h:numeric
+template_fields.id:uuid
+template_fields.label:text
+template_fields.meta:jsonb
+template_fields.page:integer
+template_fields.required:boolean
+template_fields.signer_role:text
+template_fields.template_id:uuid
+template_fields.w:numeric
+template_fields.x:numeric
+template_fields.y:numeric
+template_placeholders.created_at:timestamp with time zone
+template_placeholders.default_value:text
+template_placeholders.description:text
+template_placeholders.id:uuid
+template_placeholders.is_system:boolean
+template_placeholders.placeholder_label:character varying(255)
+template_placeholders.placeholder_name:character varying(100)
+template_placeholders.placeholder_type:character varying(50)
+template_question_options.created_at:timestamp with time zone
+template_question_options.id:uuid
+template_question_options.option_text:character varying(255)
+template_question_options.option_value:character varying(255)
+template_question_options.question_id:uuid
+template_question_options.sort_order:integer
+template_questions.created_at:timestamp with time zone
+template_questions.id:uuid
+template_questions.is_required:boolean
+template_questions.placeholder_name:character varying(100)
+template_questions.question_text:text
+template_questions.question_type:character varying(50)
+template_questions.sort_order:integer
+template_questions.template_id:uuid
+template_questions.validation_rules:jsonb
+template_responses.created_at:timestamp with time zone
+template_responses.id:uuid
+template_responses.question_id:uuid
+template_responses.response_value:text
+template_responses.sale_id:uuid
+template_responses.template_id:uuid
+template_responses.updated_at:timestamp with time zone
+template_versions.content:text
+template_versions.created_at:timestamp with time zone
+template_versions.created_by:uuid
+template_versions.designer_version:text
+template_versions.id:uuid
+template_versions.is_published:boolean
+template_versions.layout_snapshot:jsonb
+template_versions.template_id:uuid
+template_versions.version_label:text
+template_versions.version_number:integer
+template_workflow_states.created_at:timestamp with time zone
+template_workflow_states.id:uuid
+template_workflow_states.is_final:boolean
+template_workflow_states.state_name:character varying(100)
+template_workflow_states.state_order:integer
+template_workflow_states.template_id:uuid
+templates.company_id:uuid
+templates.content:text
+templates.created_at:timestamp with time zone
+templates.created_by:uuid
+templates.description:text
+templates.designer_version:text
+templates.id:uuid
+templates.is_active:boolean
+templates.name:character varying(255)
+templates.pdf_layout:jsonb
+templates.published_version_id:uuid
+templates.render_engine:text
+templates.requires_signature:boolean
+templates.template_type:character varying
+templates.updated_at:timestamp with time zone
+templates.uses_dynamic_fields:boolean
+templates.version:integer
+templates_backup_20261013.company_id:uuid
+templates_backup_20261013.content:text
+templates_backup_20261013.created_at:timestamp with time zone
+templates_backup_20261013.created_by:uuid
+templates_backup_20261013.description:text
+templates_backup_20261013.designer_version:text
+templates_backup_20261013.id:uuid
+templates_backup_20261013.is_active:boolean
+templates_backup_20261013.name:character varying(255)
+templates_backup_20261013.pdf_layout:jsonb
+templates_backup_20261013.published_version_id:uuid
+templates_backup_20261013.render_engine:text
+templates_backup_20261013.requires_signature:boolean
+templates_backup_20261013.template_type:character varying
+templates_backup_20261013.updated_at:timestamp with time zone
+templates_backup_20261013.uses_dynamic_fields:boolean
+templates_backup_20261013.version:integer
+tmp_senior_annex.html:text
+tmp_senior_annex.page:integer
+user_permissions.created_at:timestamp with time zone
+user_permissions.granted:boolean
+user_permissions.granted_by:uuid
+user_permissions.id:uuid
+user_permissions.permission_key:text
+user_permissions.updated_at:timestamp with time zone
+user_permissions.user_id:uuid
+user_purchases.access_status:text
+user_purchases.created_at:timestamp with time zone
+user_purchases.id:uuid
+user_purchases.payment_id:uuid
+user_purchases.product_id:uuid
+user_purchases.updated_at:timestamp with time zone
+user_purchases.user_id:uuid
+user_roles.created_at:timestamp with time zone
+user_roles.id:uuid
+user_roles.role:app_role
+user_roles.user_id:uuid
+waha_health_logs.checked_at:timestamp with time zone
+waha_health_logs.company_id:uuid
+waha_health_logs.created_at:timestamp with time zone
+waha_health_logs.error_message:text
+waha_health_logs.id:uuid
+waha_health_logs.response_time_ms:integer
+waha_health_logs.session_status:text
+whatsapp_messages.company_id:uuid
+whatsapp_messages.created_at:timestamp with time zone
+whatsapp_messages.delivered_at:timestamp with time zone
+whatsapp_messages.error_message:text
+whatsapp_messages.id:uuid
+whatsapp_messages.message_body:text
+whatsapp_messages.message_type:character varying
+whatsapp_messages.phone_number:character varying
+whatsapp_messages.read_at:timestamp with time zone
+whatsapp_messages.sale_id:uuid
+whatsapp_messages.sent_at:timestamp with time zone
+whatsapp_messages.sent_by:uuid
+whatsapp_messages.signature_link_id:uuid
+whatsapp_messages.status:character varying
+whatsapp_messages.whatsapp_message_id:character varying
+whatsapp_notifications.company_id:uuid
+whatsapp_notifications.created_at:timestamp with time zone
+whatsapp_notifications.error_message:text
+whatsapp_notifications.id:uuid
+whatsapp_notifications.message:text
+whatsapp_notifications.phone_number:character varying(50)
+whatsapp_notifications.sale_id:uuid
+whatsapp_notifications.sent_at:timestamp with time zone
+whatsapp_notifications.status:character varying(50)
+whatsapp_templates.company_id:uuid
+whatsapp_templates.created_at:timestamp with time zone
+whatsapp_templates.description:text
+whatsapp_templates.id:uuid
+whatsapp_templates.is_active:boolean
+whatsapp_templates.message_body:text
+whatsapp_templates.template_key:text
+whatsapp_templates.template_name:text
+whatsapp_templates.updated_at:timestamp with time zone$esquema_ref$, E'\n');
+  v_actual text[];
+  v_faltan text[];
+  v_sobran text[];
+BEGIN
+  SELECT coalesce(array_agg(c.relname || '.' || a.attname || ':' || format_type(a.atttypid, a.atttypmod)), '{}')
+    INTO v_actual
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+   WHERE c.relkind IN ('r', 'p');
+
+  SELECT coalesce(array_agg(x ORDER BY x), '{}') INTO v_faltan FROM unnest(v_ref) x WHERE x <> ALL (v_actual);
+  SELECT coalesce(array_agg(x ORDER BY x), '{}') INTO v_sobran FROM unnest(v_actual) x WHERE x <> ALL (v_ref);
+
+  IF cardinality(v_faltan) + cardinality(v_sobran) > 0 THEN
+    RAISE EXCEPTION 'ESQUEMA DISTINTO DEL APROBADO (no es BR prod o prod cambio desde la captura). No se hizo nada. Faltan %: % | Sobran %: %',
+      cardinality(v_faltan), array_to_string(v_faltan[1:10], ', '),
+      cardinality(v_sobran), array_to_string(v_sobran[1:10], ', ');
+  END IF;
+END
+$esquema$;
 $pase_00$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 0.b foto antes
   -- ##########################################################################
   v_paso := '0.b foto antes';
+  v_t := clock_timestamp();
   EXECUTE $pase_01$
 -- 0.b Foto "antes", en un esquema propio que se borra al final
 CREATE SCHEMA pe_scratch;
 
-CREATE TABLE pe_scratch.columnas (tabla text, columna text, PRIMARY KEY (tabla, columna));
+-- Columnas con su tipo: al final tienen que seguir todas, iguales. Atrapa un
+-- DROP COLUMN, un RENAME o un cambio de tipo, que no siempre escriben filas.
+CREATE TABLE pe_scratch.columnas (tabla text, columna text, tipo text, PRIMARY KEY (tabla, columna));
 INSERT INTO pe_scratch.columnas
-SELECT c.table_name, c.column_name
-  FROM information_schema.columns c
-  JOIN pg_tables t ON t.schemaname = 'public' AND t.tablename = c.table_name
- WHERE c.table_schema = 'public';
+SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod)
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+  JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+ WHERE c.relkind IN ('r', 'p');
 
--- Huella de una tabla sobre las columnas que tenia ANTES del pase, asi las
--- columnas nuevas no la alteran. Los valores grandes (> 2000 bytes, que viven
--- en TOAST: PDFs en base64, HTML de plantillas, old/new_values de auditoria)
--- entran por su tamano almacenado, que se lee sin descomprimirlos; asi la foto
--- lee ~30 MB y no ~1 GB. Todo lo demas entra con su valor completo.
+-- Huella de una tabla: conteo + md5 de la identidad fisica de cada fila
+-- (ctid = donde esta la version de la fila, xmin = la transaccion que la
+-- escribio). Cualquier escritura sobre una fila crea una version nueva, con
+-- otro ctid y con el xmin de ESTA transaccion: un UPDATE con los mismos
+-- valores, un cambio de contenido de un PDF que conserva el tamano, un DELETE
+-- o una reescritura de la tabla cambian la huella. Un VACUUM concurrente no:
+-- no mueve filas vivas y conserva su xmin original al congelarlas.
+-- No lee el contenido de las columnas: en prod las 88 tablas tardan 0,08 s.
 CREATE FUNCTION pe_scratch.huella(p_tabla text, p_where text DEFAULT '', OUT filas bigint, OUT huella text)
 LANGUAGE plpgsql AS $fn$
-DECLARE
-  v_expr text;
 BEGIN
-  SELECT string_agg(
-           format('coalesce(%s, %L)',
-                  CASE WHEN ty.typlen = -1
-                       THEN format('CASE WHEN pg_column_size(%1$I) > 2000 THEN %2$L || pg_column_size(%1$I) ELSE md5(%1$I::text) END', c.columna, 'sz:')
-                       ELSE format('%I::text', c.columna) END,
-                  '~null~'),
-           ', ' ORDER BY c.columna)
-    INTO v_expr
-    FROM pe_scratch.columnas c
-    JOIN pg_attribute a ON a.attrelid = format('public.%I', p_tabla)::regclass
-                       AND a.attname = c.columna AND NOT a.attisdropped
-    JOIN pg_type ty ON ty.oid = a.atttypid
-   WHERE c.tabla = p_tabla;
-
+  IF to_regclass(format('public.%I', p_tabla)) IS NULL THEN
+    filas := -1;
+    huella := 'LA TABLA YA NO EXISTE';
+    RETURN;
+  END IF;
   EXECUTE format(
-    'SELECT count(*), md5(coalesce(string_agg(h, %L ORDER BY h), %L)) FROM (SELECT md5(concat_ws(%L, %s)) AS h FROM public.%I %s) s',
-    '', '', '|', v_expr, p_tabla, p_where)
+    'SELECT count(*), md5(coalesce(string_agg(ctid::text || %L || xmin::text, %L ORDER BY ctid), %L)) FROM public.%I %s',
+    ':', ',', '', p_tabla, p_where)
   INTO filas, huella;
 END
 $fn$;
 
 CREATE TABLE pe_scratch.foto (tabla text PRIMARY KEY, filas bigint, huella text);
 INSERT INTO pe_scratch.foto
-SELECT t.tablename, h.filas, h.huella
-  FROM pg_tables t, LATERAL pe_scratch.huella(t.tablename) h
- WHERE t.schemaname = 'public';
+SELECT c.relname, h.filas, h.huella
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+  CROSS JOIN LATERAL pe_scratch.huella(c.relname) h
+ WHERE c.relkind IN ('r', 'p');
 
 -- Las plantillas son la unica tabla que gana filas: se guardan sus ids para
 -- comparar la huella sobre las preexistentes.
@@ -124,11 +1142,15 @@ SELECT 'plantillas_nuevas',
        (SELECT count(*) FROM public.companies) * 5
        - (SELECT count(*) FROM public.templates WHERE name = ANY (ARRAY['Anexo de Incorporación de Adherente', 'Formulario de Solicitud de Cambio de Plan', 'Anexo Especial de Vigencia Inmediata', 'Contrato Colectivo de Empresa', 'Anexo de Movimiento de Nomina']::text[]));
 $pase_01$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- PASO 0 (A1)
   -- ##########################################################################
   v_paso := 'PASO 0 (A1)';
+  v_t_bloqueo := clock_timestamp();
+  v_t := clock_timestamp();
   EXECUTE $pase_02$
 -- PASO 0 (A1) — columnas que ninguna migracion crea y prod no tiene.
 -- Con DEFAULT constante: en PG 17 no reescribe la tabla ni dispara triggers, y
@@ -154,11 +1176,14 @@ $chk$;
 ALTER TABLE public.beneficiaries
   ADD COLUMN IF NOT EXISTS coverage_end_date date;
 $pase_02$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260813000001_adherent_incorporation_schema.sql
   -- ##########################################################################
   v_paso := '20260813000001_adherent_incorporation_schema.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_03$
 -- =====================================================================
 -- Fase 0 — Esquema para "Incorporación de Adherente" y "Empresas titular"
@@ -361,11 +1386,14 @@ BEGIN
   END IF;
 END $$;
 $pase_03$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260813000002_incorporacion_varios_adherentes.sql
   -- ##########################################################################
   v_paso := '20260813000002_incorporacion_varios_adherentes.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_04$
 -- =====================================================================
 -- Fase 2 — Ajuste: un Anexo puede incorporar VARIAS personas
@@ -497,11 +1525,14 @@ BEGIN
 END;
 $function$;
 $pase_04$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260813000003_activacion_incorporacion.sql
   -- ##########################################################################
   v_paso := '20260813000003_activacion_incorporacion.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_05$
 -- =====================================================================
 -- Fase 2 — Activación automática de la Incorporación de Adherente
@@ -685,11 +1716,14 @@ AFTER UPDATE ON public.sales
 FOR EACH ROW
 EXECUTE FUNCTION public.activate_adherent_incorporation();
 $pase_05$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260817000001_fix_incorporacion_status_vocabulario.sql
   -- ##########################################################################
   v_paso := '20260817000001_fix_incorporacion_status_vocabulario.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_06$
 -- Fix: el trigger escribia en adherent_incorporations un estado que la tabla rechaza.
 --
@@ -803,11 +1837,14 @@ BEGIN
 END;
 $function$;
 $pase_06$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260817000002_sales_maternity_bonus.sql
   -- ##########################################################################
   v_paso := '20260817000002_sales_maternity_bonus.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_07$
 -- Plan Materno como ADICIONAL de la venta, no como plan propio.
 --
@@ -834,11 +1871,14 @@ COMMENT ON COLUMN public.sales.maternity_bonus IS
 CREATE INDEX IF NOT EXISTS idx_sales_maternity_bonus
   ON public.sales (company_id) WHERE maternity_bonus;
 $pase_07$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260818000001_fix_total_amount_single_source.sql
   -- ##########################################################################
   v_paso := '20260818000001_fix_total_amount_single_source.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_08$
 -- Fuente unica de verdad para sales.total_amount.
 --
@@ -916,11 +1956,14 @@ BEGIN
   RAISE NOTICE 'ventas cuyo total difiere de la formula (no se tocaron): %', v_n;
 END $$;
 $pase_08$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260818000002_beneficiaries_signed_contract_guard.sql
   -- ##########################################################################
   v_paso := '20260818000002_beneficiaries_signed_contract_guard.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_09$
 -- Respaldo en la base del bloqueo de adherentes en contratos firmados.
 --
@@ -1073,11 +2116,14 @@ CREATE TRIGGER trg_beneficiaries_block_when_sale_signed
   FOR EACH ROW
   EXECUTE FUNCTION public.beneficiaries_block_when_sale_signed();
 $pase_09$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260818000003_adherent_incorporation_lifecycle.sql
   -- ##########################################################################
   v_paso := '20260818000003_adherent_incorporation_lifecycle.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_10$
 -- Ciclo de vida de una Incorporación de Adherente.
 --
@@ -1147,11 +2193,14 @@ CREATE TRIGGER trg_adherent_incorporations_guard_lifecycle
   FOR EACH ROW
   EXECUTE FUNCTION public.adherent_incorporations_guard_lifecycle();
 $pase_10$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260819000001_plan_change_schema.sql
   -- ##########################################################################
   v_paso := '20260819000001_plan_change_schema.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_11$
 -- =====================================================================
 -- Fase 0 — Esquema para "Cambio de Plan" (FORMULARIO DE SOLICITUD DE CAMBIO)
@@ -1363,11 +2412,14 @@ BEGIN
 END;
 $function$;
 $pase_11$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260819000002_plan_change_activation.sql
   -- ##########################################################################
   v_paso := '20260819000002_plan_change_activation.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_12$
 -- =====================================================================
 -- Fase 2 — Activación automática del "Cambio de Plan" + guarda de ciclo de vida
@@ -1654,11 +2706,14 @@ CREATE TRIGGER trg_plan_changes_guard_lifecycle
   FOR EACH ROW
   EXECUTE FUNCTION public.plan_changes_guard_lifecycle();
 $pase_12$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260822000001_templates_unique_name_por_empresa.sql
   -- ##########################################################################
   v_paso := '20260822000001_templates_unique_name_por_empresa.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_13$
 -- =====================================================================
 -- Nombre único de plantilla por empresa
@@ -1717,11 +2772,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_templates_company_name
 COMMENT ON INDEX public.uq_templates_company_name IS
   'Nombre de plantilla único por empresa. Habilita el ON CONFLICT del seed de plantillas de tipos de venta (20260822000002).';
 $pase_13$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260822000002_seed_plantillas_tipos_venta.sql
   -- ##########################################################################
   v_paso := '20260822000002_seed_plantillas_tipos_venta.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_14$
 -- =====================================================================
 -- Seed de las plantillas de los 3 tipos de venta
@@ -2114,11 +3172,14 @@ BEGIN
 END
 $seed$;
 $pase_14$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260908000001_beneficiaries_nomina_empresa.sql
   -- ##########################################################################
   v_paso := '20260908000001_beneficiaries_nomina_empresa.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_15$
 -- Nómina de un contrato de EMPRESA: empleados con plan propio y adherentes a cargo.
 --
@@ -2297,11 +3358,14 @@ CREATE TRIGGER trg_beneficiaries_validate_nomina
 -- siguen fallando hasta el próximo reinicio del servicio.
 NOTIFY pgrst, 'reload schema';
 $pase_15$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260908000002_clients_contacto_rrhh.sql
   -- ##########################################################################
   v_paso := '20260908000002_clients_contacto_rrhh.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_16$
 -- Contacto de RR.HH. del cliente EMPRESA.
 --
@@ -2330,11 +3394,14 @@ COMMENT ON COLUMN public.clients.hr_contact_name IS
 
 NOTIFY pgrst, 'reload schema';
 $pase_16$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260908000003_adherent_incorporations_movimientos.sql
   -- ##########################################################################
   v_paso := '20260908000003_adherent_incorporations_movimientos.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_17$
 -- Movimientos de nómina: `adherent_incorporations` pasa a cubrir ALTA y BAJA.
 --
@@ -2491,11 +3558,14 @@ CREATE TRIGGER trg_adherent_incorporations_guard_lifecycle
 
 NOTIFY pgrst, 'reload schema';
 $pase_17$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260908000004_total_amount_excluye_bajas.sql
   -- ##########################################################################
   v_paso := '20260908000004_total_amount_excluye_bajas.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_18$
 -- `sales.total_amount` deja de contar a los beneficiarios dados de baja.
 --
@@ -2640,11 +3710,14 @@ BEGIN
 END
 $control$;
 $pase_18$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260908000005_activate_incorporation_movimientos.sql
   -- ##########################################################################
   v_paso := '20260908000005_activate_incorporation_movimientos.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_19$
 -- Activación de los movimientos de nómina: la baja desvincula, el alta suma.
 --
@@ -2842,11 +3915,14 @@ $function$;
 -- El trigger no se recrea: sigue siendo el mismo `trg_activate_adherent_incorporation`
 -- (AFTER UPDATE ON sales) apuntando a esta función, que conserva nombre y firma.
 $pase_19$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260908000006_seed_plantillas_empresa.sql
   -- ##########################################################################
   v_paso := '20260908000006_seed_plantillas_empresa.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_20$
 -- =====================================================================
 -- Seed de las plantillas del contrato de EMPRESA y del anexo de movimiento
@@ -3238,11 +4314,14 @@ BEGIN
 END
 $seed$;
 $pase_20$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260909000001_beneficiaries_opciones_por_empleado.sql
   -- ##########################################################################
   v_paso := '20260909000001_beneficiaries_opciones_por_empleado.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_21$
 -- ============================================================================
 -- Opciones por EMPLEADO en la nomina de un contrato de empresa
@@ -3297,11 +4376,14 @@ UPDATE public.beneficiaries e
                     WHERE s.id = e.sale_id
                       AND s.status IN ('firmado','completado'));
 $pase_21$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260909000002_beneficiaries_sin_titular_en_empresa.sql
   -- ##########################################################################
   v_paso := '20260909000002_beneficiaries_sin_titular_en_empresa.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_22$
 -- ============================================================================
 -- Una venta de EMPRESA no lleva beneficiario titular
@@ -3381,11 +4463,14 @@ BEGIN
 END;
 $$;
 $pase_22$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260910000001_sales_contract_end_date.sql
   -- ##########################################################################
   v_paso := '20260910000001_sales_contract_end_date.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_23$
 -- ============================================================================
 -- Fin de vigencia del contrato (sales.contract_end_date)
@@ -3427,11 +4512,14 @@ CREATE INDEX IF NOT EXISTS idx_sales_contract_end_date
   ON public.sales (contract_end_date)
   WHERE contract_end_date IS NOT NULL;
 $pase_23$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260910000002_notify_expiring_sales.sql
   -- ##########################################################################
   v_paso := '20260910000002_notify_expiring_sales.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_24$
 -- ============================================================================
 -- Aviso al vendedor: falta 1 mes para que venza la vigencia del contrato
@@ -3567,11 +4655,14 @@ REVOKE ALL ON FUNCTION public.notify_expiring_sales(integer) FROM PUBLIC, anon, 
 -- El agendado va en 20260910000003, en su propio archivo a proposito: ver el
 -- encabezado de esa migracion.
 $pase_24$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260910000003_schedule_notify_expiring_sales.sql
   -- ##########################################################################
   v_paso := '20260910000003_schedule_notify_expiring_sales.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_25$
 -- ============================================================================
 -- Agendado diario del aviso de vencimiento (pg_cron)
@@ -3615,11 +4706,14 @@ SELECT cron.schedule(
   $$SELECT public.notify_expiring_sales(30);$$
 );
 $pase_25$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- 20260910000004_alta_empleado_con_adherentes.sql
   -- ##########################################################################
   v_paso := '20260910000004_alta_empleado_con_adherentes.sql';
+  v_t := clock_timestamp();
   EXECUTE $pase_26$
 -- ============================================================================
 -- Alta de un EMPLEADO junto con sus ADHERENTES en un solo movimiento
@@ -3825,11 +4919,14 @@ $function$;
 -- El trigger ya existe (trg_activate_adherent_incorporation ON sales) y no
 -- se recrea: se reemplaza sólo el cuerpo de la función.
 $pase_26$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
   -- verificacion, guarda de datos e historial
   -- ##########################################################################
   v_paso := 'verificacion, guarda de datos e historial';
+  v_t := clock_timestamp();
   EXECUTE $pase_27$
 -- ############################################################################
 -- VERIFICACION — aborta si falta algo
@@ -3923,9 +5020,19 @@ BEGIN
 
     IF v_h.filas <> r.filas OR v_h.huella <> r.huella THEN
       v_errores := v_errores || format('%s: %s filas -> %s%s', r.tabla, r.filas, v_h.filas,
-                                       CASE WHEN v_h.filas = r.filas THEN ' (mismo conteo, contenido distinto)' ELSE '' END);
+                                       CASE WHEN v_h.filas = r.filas THEN ' (mismo conteo, filas reescritas)' ELSE '' END);
     END IF;
   END LOOP;
+
+  -- Columnas preexistentes: todas siguen, con el mismo nombre y el mismo tipo.
+  SELECT v_errores || coalesce(array_agg(format('columna %s.%s (%s) desaparecio o cambio de tipo', c.tabla, c.columna, c.tipo)
+                                         ORDER BY c.tabla, c.columna), '{}')
+    INTO v_errores
+    FROM pe_scratch.columnas c
+   WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a
+                      WHERE a.attrelid = to_regclass(format('public.%I', c.tabla))
+                        AND a.attname = c.columna AND a.attnum > 0 AND NOT a.attisdropped
+                        AND format_type(a.atttypid, a.atttypmod) = c.tipo);
 
   -- templates: ademas de las preexistentes intactas, exactamente las sembradas
   -- y todas inactivas.
@@ -3944,7 +5051,7 @@ BEGIN
     RAISE EXCEPTION 'GUARDA DE DATOS: el pase modifico datos existentes. Se deshace todo. %', array_to_string(v_errores, ' | ');
   END IF;
 
-  RAISE NOTICE 'Guarda OK: % tablas identicas; % plantillas nuevas, inactivas.', v_n, v_nuevas;
+  RAISE NOTICE 'Guarda OK: % tablas sin ninguna fila escrita; % plantillas nuevas, inactivas.', v_n, v_nuevas;
 END
 $guarda$;
 
@@ -4016,6 +5123,24 @@ BEGIN
 END
 $hist$;
 $pase_27$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
+
+  v_paso := 'mediciones';
+  v_bloqueo := round(extract(epoch FROM clock_timestamp() - v_t_bloqueo)::numeric, 2);
+  v_total := round(extract(epoch FROM clock_timestamp() - v_t_inicio)::numeric, 2);
+  SELECT string_agg(format('%s %s s', n, round(d, 2)), ', ' ORDER BY d DESC) INTO v_lentos
+    FROM (SELECT n, d FROM unnest(v_nombres, v_duraciones) u(n, d) ORDER BY d DESC LIMIT 3) s;
+  IF to_regclass('supabase_migrations.schema_migrations') IS NOT NULL THEN
+    EXECUTE 'SELECT count(*) FROM supabase_migrations.schema_migrations WHERE version <> ALL ($1)'
+      INTO v_sin_archivo USING ARRAY['20250710182447', '20250710192711', '20250711110418', '20250715193438', '20250715195259', '20250715205545', '20250716144836', '20250716153716', '20250716155645', '20250716161248', '20250716162259', '20250716210249', '20250717002333', '20250717151249', '20250717170712', '20250717171225', '20250717195407', '20250717201311', '20250718125307', '20250725221720', '20250727181607', '20250730114958', '20250731123927', '20250731125815', '20250801111126', '20250801112733', '20250801140726', '20250803231059', '20250807125437', '20250807150749', '20250811204601', '20250812124915', '20250813123552', '20250814113907', '20250818131139', '20260203023846', '20260203023945', '20260203024758', '20260203114224', '20260203132328', '20260204022658', '20260205193814', '20260205194053', '20260205194128', '20260205203420', '20260206124854', '20260209130156', '20260209132845', '20260209171351', '20260209173731', '20260209181719', '20260209181922', '20260209191333', '20260209210415', '20260210120000', '20260210130000', '20260210143000', '20260211000000', '20260211100000', '20260211100001', '20260211180635', '20260211183409', '20260211183809', '20260211185141', '20260211192246', '20260211193726', '20260211200856', '20260211201657', '20260211202857', '20260213185108', '20260215030225', '20260215030640', '20260216120000', '20260218215303', '20260219013511', '20260219123301', '20260219130000', '20260220191434', '20260223120000', '20260223153000', '20260224120000', '20260224184412', '20260224201035', '20260224203002', '20260224203435', '20260225135136', '20260225152638', '20260226133225', '20260226163113', '20260226164303', '20260226172651', '20260226174702', '20260227004522', '20260304004143', '20260304112449', '20260304112557', '20260304120000', '20260304133819', '20260304141401', '20260304141708', '20260305211955', '20260306171942', '20260306174522', '20260306174644', '20260308022010', '20260308055116', '20260310120000', '20260313122252', '20260313202614', '20260313204145', '20260313204230', '20260313204443', '20260313204627', '20260313211823', '20260313211913', '20260313212022', '20260316191713', '20260316201341', '20260318005826', '20260318021419', '20260318022449', '20260318212246', '20260318212319', '20260318214336', '20260318214356', '20260319154519', '20260320115908', '20260320121637', '20260320132936', '20260320161525', '20260325103000', '20260325104500', '20260325105000', '20260330120000', '20260331012519', '20260331012616', '20260331021912', '20260331023708', '20260331121915', '20260331142943', '20260331161407', '20260331223756', '20260331230901', '20260401003748', '20260402203606', '20260404235832', '20260406153000', '20260407144448', '20260414000000', '20260414000001', '20260414000002', '20260416103000', '20260804175027', '20260804175810', '20260804190000', '20260804200000', '20260804210000', '20260804220000', '20260813000001', '20260813000002', '20260813000003', '20260817000001', '20260817000002', '20260818000001', '20260818000002', '20260818000003', '20260819000001', '20260819000002', '20260819000003', '20260819210000', '20260821120000', '20260822000001', '20260822000002', '20260822000003', '20260908000001', '20260908000002', '20260908000003', '20260908000004', '20260908000005', '20260908000006', '20260909000001', '20260909000002', '20260910000001', '20260910000002', '20260910000003', '20260910000004', '20261007000001']::text[];
+  END IF;
+  v_medicion := format('Tablas bloqueadas %s s (desde el PASO 0 hasta el final; total %s s). Pasos mas lentos: %s. '
+                       || 'db push: %s.',
+                       v_bloqueo, v_total, v_lentos,
+                       CASE WHEN coalesce(v_sin_archivo, 0) > 0
+                            THEN format('BLOQUEADO por la CLI (%s versiones en el historial sin archivo en el repo)', v_sin_archivo)
+                            ELSE 'ATENCION, la CLI podria aplicar migraciones excluidas (comisiones) con un db push' END);
 
   -- FIN DEL SIMULACRO. El error de abajo ES el resultado esperado: llegar hasta
   -- aca significa que todo se aplico, la verificacion paso y la guarda no
@@ -4023,8 +5148,8 @@ $pase_27$;
   v_paso := 'fin del simulacro';
   EXECUTE 'SELECT count(*) FROM pe_scratch.foto' INTO v_tablas;
   EXECUTE 'SELECT valor FROM pe_scratch.esperado WHERE clave = ''plantillas_nuevas''' INTO v_plantillas;
-  RAISE EXCEPTION 'SIMULACRO OK — nada quedo aplicado. % tablas verificadas sin cambios, % plantillas nuevas (inactivas).',
-    v_tablas, v_plantillas;
+  RAISE EXCEPTION 'SIMULACRO OK — nada quedo aplicado. % tablas verificadas sin ninguna fila escrita, % plantillas nuevas (inactivas). %',
+    v_tablas, v_plantillas, v_medicion;
 
 EXCEPTION WHEN OTHERS THEN
   -- Cualquier error deshace la sentencia ENTERA; esto solo agrega en que paso fue.

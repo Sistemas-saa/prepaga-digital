@@ -14,12 +14,58 @@
 // abajo. Cada reemplazo exige encontrar el texto exacto una sola vez; si una
 // migracion cambia, el generador falla en vez de producir algo distinto.
 
+import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const MIG_DIR = join(ROOT, 'supabase', 'migrations');
+
+// ---------------------------------------------------------------------------
+// Esquema aprobado de prod (precondicion 0.a)
+// ---------------------------------------------------------------------------
+// El script compara el esquema de public de la base destino contra esta
+// referencia, columna por columna y con su tipo, y aborta ante cualquier
+// diferencia. Es lo que identifica al destino: US test difiere en decenas de
+// tablas, y una copia restaurada de prod coincide (que es lo que se quiere para
+// el ensayo). El md5 es el de la 2da consulta de esquema-prod-referencia.sql,
+// medido en prod: asegura que el .txt se transcribio sin errores.
+const ESQUEMA_MD5 = '636520e7e17019f079443b11b73b765f';
+const ESQUEMA_TABLAS = 88;
+const ESQUEMA_COLUMNAS = 969;
+const ESQUEMA = (() => {
+  const txt = readFileSync(join(ROOT, 'scripts', 'produccion', 'esquema-prod-referencia.txt'), 'utf8').replace(/\r\n/g, '\n');
+  const cols = [];
+  for (const linea of txt.split('\n')) {
+    if (!linea.trim() || linea.startsWith('#')) continue;
+    const [tabla, resto, sobra] = linea.split('|');
+    if (!resto || sobra !== undefined) throw new Error(`esquema-prod-referencia.txt: linea mal formada: ${linea.slice(0, 60)}`);
+    // El tipo puede llevar comas (numeric(12,2)): se corta solo fuera de parentesis.
+    for (const c of resto.split(/,(?![^()]*\))/)) {
+      const i = c.indexOf(':');
+      cols.push({ tabla, columna: c.slice(0, i), tipo: c.slice(i + 1) });
+    }
+  }
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0); // orden de bytes = COLLATE "C"
+  cols.sort((a, b) => cmp(a.tabla, b.tabla) || cmp(a.columna, b.columna));
+  const entradas = cols.map((c) => `${c.tabla}.${c.columna}:${c.tipo}`);
+  const md5 = createHash('md5').update(entradas.join(',')).digest('hex');
+  const tablas = new Set(cols.map((c) => c.tabla)).size;
+  if (md5 !== ESQUEMA_MD5 || tablas !== ESQUEMA_TABLAS || entradas.length !== ESQUEMA_COLUMNAS) {
+    throw new Error(`esquema-prod-referencia.txt no coincide con lo medido en prod: ${tablas} tablas, ${entradas.length} columnas, md5 ${md5}`);
+  }
+  return entradas;
+})();
+
+// Versiones que existen como archivo en el repo. Si el historial de la base
+// destino tiene alguna que no esta aca, la CLI de Supabase se niega a hacer
+// "db push" ("Remote migration versions not found in local migrations
+// directory"). Hoy prod tiene 89 asi: es lo que impide un push accidental.
+const VERSIONES_LOCALES = readdirSync(MIG_DIR)
+  .map((f) => f.match(/^(\d{14})_.*\.sql$/)?.[1])
+  .filter(Boolean)
+  .sort();
 
 // Las 3 ventas completadas cuyo total guardado difiere de la formula nueva
 // (relevado en prod el 2026-10-25). El script NO las toca (A2).
@@ -141,7 +187,9 @@ const ENCABEZADO = (modo) => `-- ===============================================
 -- cambiar la migracion o el generador y volver a generar.
 --
 -- Proyecto destino: ejiycfqxgtrzaysgpzmx (BR prod) o una COPIA de prod para el
--- ensayo. Aborta solo si ve que ya se aplico o que la base no es prod.
+-- ensayo. Aborta solo si ve que ya se aplico, o si el esquema de public no es
+-- EXACTAMENTE el aprobado (scripts/produccion/esquema-prod-referencia.txt:
+-- ${ESQUEMA_TABLAS} tablas, ${ESQUEMA_COLUMNAS} columnas con su tipo).
 --
 -- Como correrlo: pegar el archivo ENTERO en el SQL Editor, o psql -f.
 --
@@ -155,11 +203,18 @@ const ENCABEZADO = (modo) => `-- ===============================================
 -- Garantias (ver docs/runbooks/produccion-entrega-a.md, seccion 11):
 --   * Atomico: o se aplica todo, o nada.
 --   * Cero UPDATE/DELETE sobre filas existentes. Ajustes A1-A7 aplicados.
---   * Guarda de datos: antes de tocar nada saca una huella (conteo + md5 de
---     todas las columnas) de CADA tabla de public, y al final la compara. Si una
---     sola fila preexistente cambio, se borro o aparecio de mas, ABORTA.
---   * lock_timeout de 3 s: si una tabla esta en uso, se cancela en vez de
---     dejar a los usuarios esperando.
+--   * Guarda de datos: antes de tocar nada guarda, de CADA tabla de public, la
+--     identidad fisica de cada fila (ctid + xmin) y las columnas con su tipo; al
+--     final lo compara. Todo UPDATE —aunque deje los mismos valores—, DELETE,
+--     INSERT o reescritura de tabla crea otra version de fila con otro ctid y
+--     otro xmin, asi que si UNA sola fila preexistente fue escrita, ABORTA. No
+--     depende del contenido: cubre igual un PDF de 2 MB que un booleano.
+--   * Bloqueo: lock_timeout de 3 s limita cuanto se ESPERA para conseguir un
+--     bloqueo, no cuanto se lo retiene. Desde el PASO 0 hasta el final, las
+--     tablas alteradas (beneficiaries, sales, clients, ...) quedan bloqueadas
+--     para lectura y escritura. El script informa esa duracion al terminar
+--     (en el mensaje del SIMULACRO y como NOTICE en el real): medirla en el
+--     ensayo y en el simulacro antes de elegir la ventana.
 --
 -- Si aborta por la guarda nombrando una tabla que el pase no toca (p. ej.
 -- signature_links), es actividad concurrente de un usuario o de un cron entre
@@ -183,55 +238,81 @@ BEGIN
   END IF;
 END
 $pre$;
+
+-- 0.a' El esquema de public tiene que ser EXACTAMENTE el aprobado: mismas
+-- tablas, mismas columnas, mismos tipos. Identifica al destino (BR prod o una
+-- copia restaurada) y garantiza que las migraciones corren sobre lo que se
+-- ensayo. Si prod cambio desde la captura, revisar y recapturar la referencia.
+DO $esquema$
+DECLARE
+  v_ref    text[] := string_to_array($esquema_ref$${ESQUEMA.join('\n')}$esquema_ref$, E'\\n');
+  v_actual text[];
+  v_faltan text[];
+  v_sobran text[];
+BEGIN
+  SELECT coalesce(array_agg(c.relname || '.' || a.attname || ':' || format_type(a.atttypid, a.atttypmod)), '{}')
+    INTO v_actual
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+   WHERE c.relkind IN ('r', 'p');
+
+  SELECT coalesce(array_agg(x ORDER BY x), '{}') INTO v_faltan FROM unnest(v_ref) x WHERE x <> ALL (v_actual);
+  SELECT coalesce(array_agg(x ORDER BY x), '{}') INTO v_sobran FROM unnest(v_actual) x WHERE x <> ALL (v_ref);
+
+  IF cardinality(v_faltan) + cardinality(v_sobran) > 0 THEN
+    RAISE EXCEPTION 'ESQUEMA DISTINTO DEL APROBADO (no es BR prod o prod cambio desde la captura). No se hizo nada. Faltan %: % | Sobran %: %',
+      cardinality(v_faltan), array_to_string(v_faltan[1:10], ', '),
+      cardinality(v_sobran), array_to_string(v_sobran[1:10], ', ');
+  END IF;
+END
+$esquema$;
 `;
 
 const FOTO = `
 -- 0.b Foto "antes", en un esquema propio que se borra al final
 CREATE SCHEMA pe_scratch;
 
-CREATE TABLE pe_scratch.columnas (tabla text, columna text, PRIMARY KEY (tabla, columna));
+-- Columnas con su tipo: al final tienen que seguir todas, iguales. Atrapa un
+-- DROP COLUMN, un RENAME o un cambio de tipo, que no siempre escriben filas.
+CREATE TABLE pe_scratch.columnas (tabla text, columna text, tipo text, PRIMARY KEY (tabla, columna));
 INSERT INTO pe_scratch.columnas
-SELECT c.table_name, c.column_name
-  FROM information_schema.columns c
-  JOIN pg_tables t ON t.schemaname = 'public' AND t.tablename = c.table_name
- WHERE c.table_schema = 'public';
+SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod)
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+  JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+ WHERE c.relkind IN ('r', 'p');
 
--- Huella de una tabla sobre las columnas que tenia ANTES del pase, asi las
--- columnas nuevas no la alteran. Los valores grandes (> 2000 bytes, que viven
--- en TOAST: PDFs en base64, HTML de plantillas, old/new_values de auditoria)
--- entran por su tamano almacenado, que se lee sin descomprimirlos; asi la foto
--- lee ~30 MB y no ~1 GB. Todo lo demas entra con su valor completo.
+-- Huella de una tabla: conteo + md5 de la identidad fisica de cada fila
+-- (ctid = donde esta la version de la fila, xmin = la transaccion que la
+-- escribio). Cualquier escritura sobre una fila crea una version nueva, con
+-- otro ctid y con el xmin de ESTA transaccion: un UPDATE con los mismos
+-- valores, un cambio de contenido de un PDF que conserva el tamano, un DELETE
+-- o una reescritura de la tabla cambian la huella. Un VACUUM concurrente no:
+-- no mueve filas vivas y conserva su xmin original al congelarlas.
+-- No lee el contenido de las columnas: en prod las 88 tablas tardan 0,08 s.
 CREATE FUNCTION pe_scratch.huella(p_tabla text, p_where text DEFAULT '', OUT filas bigint, OUT huella text)
 LANGUAGE plpgsql AS $fn$
-DECLARE
-  v_expr text;
 BEGIN
-  SELECT string_agg(
-           format('coalesce(%s, %L)',
-                  CASE WHEN ty.typlen = -1
-                       THEN format('CASE WHEN pg_column_size(%1$I) > 2000 THEN %2$L || pg_column_size(%1$I) ELSE md5(%1$I::text) END', c.columna, 'sz:')
-                       ELSE format('%I::text', c.columna) END,
-                  '~null~'),
-           ', ' ORDER BY c.columna)
-    INTO v_expr
-    FROM pe_scratch.columnas c
-    JOIN pg_attribute a ON a.attrelid = format('public.%I', p_tabla)::regclass
-                       AND a.attname = c.columna AND NOT a.attisdropped
-    JOIN pg_type ty ON ty.oid = a.atttypid
-   WHERE c.tabla = p_tabla;
-
+  IF to_regclass(format('public.%I', p_tabla)) IS NULL THEN
+    filas := -1;
+    huella := 'LA TABLA YA NO EXISTE';
+    RETURN;
+  END IF;
   EXECUTE format(
-    'SELECT count(*), md5(coalesce(string_agg(h, %L ORDER BY h), %L)) FROM (SELECT md5(concat_ws(%L, %s)) AS h FROM public.%I %s) s',
-    '', '', '|', v_expr, p_tabla, p_where)
+    'SELECT count(*), md5(coalesce(string_agg(ctid::text || %L || xmin::text, %L ORDER BY ctid), %L)) FROM public.%I %s',
+    ':', ',', '', p_tabla, p_where)
   INTO filas, huella;
 END
 $fn$;
 
 CREATE TABLE pe_scratch.foto (tabla text PRIMARY KEY, filas bigint, huella text);
 INSERT INTO pe_scratch.foto
-SELECT t.tablename, h.filas, h.huella
-  FROM pg_tables t, LATERAL pe_scratch.huella(t.tablename) h
- WHERE t.schemaname = 'public';
+SELECT c.relname, h.filas, h.huella
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+  CROSS JOIN LATERAL pe_scratch.huella(c.relname) h
+ WHERE c.relkind IN ('r', 'p');
 
 -- Las plantillas son la unica tabla que gana filas: se guardan sus ids para
 -- comparar la huella sobre las preexistentes.
@@ -382,9 +463,19 @@ BEGIN
 
     IF v_h.filas <> r.filas OR v_h.huella <> r.huella THEN
       v_errores := v_errores || format('%s: %s filas -> %s%s', r.tabla, r.filas, v_h.filas,
-                                       CASE WHEN v_h.filas = r.filas THEN ' (mismo conteo, contenido distinto)' ELSE '' END);
+                                       CASE WHEN v_h.filas = r.filas THEN ' (mismo conteo, filas reescritas)' ELSE '' END);
     END IF;
   END LOOP;
+
+  -- Columnas preexistentes: todas siguen, con el mismo nombre y el mismo tipo.
+  SELECT v_errores || coalesce(array_agg(format('columna %s.%s (%s) desaparecio o cambio de tipo', c.tabla, c.columna, c.tipo)
+                                         ORDER BY c.tabla, c.columna), '{}')
+    INTO v_errores
+    FROM pe_scratch.columnas c
+   WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a
+                      WHERE a.attrelid = to_regclass(format('public.%I', c.tabla))
+                        AND a.attname = c.columna AND a.attnum > 0 AND NOT a.attisdropped
+                        AND format_type(a.atttypid, a.atttypmod) = c.tipo);
 
   -- templates: ademas de las preexistentes intactas, exactamente las sembradas
   -- y todas inactivas.
@@ -403,7 +494,7 @@ BEGIN
     RAISE EXCEPTION 'GUARDA DE DATOS: el pase modifico datos existentes. Se deshace todo. %', array_to_string(v_errores, ' | ');
   END IF;
 
-  RAISE NOTICE 'Guarda OK: % tablas identicas; % plantillas nuevas, inactivas.', v_n, v_nuevas;
+  RAISE NOTICE 'Guarda OK: % tablas sin ninguna fila escrita; % plantillas nuevas, inactivas.', v_n, v_nuevas;
 END
 $guarda$;
 
@@ -465,15 +556,40 @@ const piezas = (modo) => [
   ...(modo === 'real' ? [['limpieza del esquema scratch', 'DROP SCHEMA pe_scratch CASCADE;']] : []),
 ];
 
-const FIN_SIMULACRO = `
+// Mediciones que se informan al final (las dos variantes): cuanto estuvieron
+// bloqueadas las tablas, los pasos mas lentos, y si la CLI sigue sin poder
+// hacer "db push" contra esta base.
+const MEDICIONES = `
+  v_paso := 'mediciones';
+  v_bloqueo := round(extract(epoch FROM clock_timestamp() - v_t_bloqueo)::numeric, 2);
+  v_total := round(extract(epoch FROM clock_timestamp() - v_t_inicio)::numeric, 2);
+  SELECT string_agg(format('%s %s s', n, round(d, 2)), ', ' ORDER BY d DESC) INTO v_lentos
+    FROM (SELECT n, d FROM unnest(v_nombres, v_duraciones) u(n, d) ORDER BY d DESC LIMIT 3) s;
+  IF to_regclass('supabase_migrations.schema_migrations') IS NOT NULL THEN
+    EXECUTE 'SELECT count(*) FROM supabase_migrations.schema_migrations WHERE version <> ALL ($1)'
+      INTO v_sin_archivo USING ${arr(VERSIONES_LOCALES)};
+  END IF;
+  v_medicion := format('Tablas bloqueadas %s s (desde el PASO 0 hasta el final; total %s s). Pasos mas lentos: %s. '
+                       || 'db push: %s.',
+                       v_bloqueo, v_total, v_lentos,
+                       CASE WHEN coalesce(v_sin_archivo, 0) > 0
+                            THEN format('BLOQUEADO por la CLI (%s versiones en el historial sin archivo en el repo)', v_sin_archivo)
+                            ELSE 'ATENCION, la CLI podria aplicar migraciones excluidas (comisiones) con un db push' END);
+`;
+
+const FIN_SIMULACRO = `${MEDICIONES}
   -- FIN DEL SIMULACRO. El error de abajo ES el resultado esperado: llegar hasta
   -- aca significa que todo se aplico, la verificacion paso y la guarda no
   -- encontro cambios. Al abortar la sentencia, Postgres revierte TODO.
   v_paso := 'fin del simulacro';
   EXECUTE 'SELECT count(*) FROM pe_scratch.foto' INTO v_tablas;
   EXECUTE 'SELECT valor FROM pe_scratch.esperado WHERE clave = ''plantillas_nuevas''' INTO v_plantillas;
-  RAISE EXCEPTION 'SIMULACRO OK — nada quedo aplicado. % tablas verificadas sin cambios, % plantillas nuevas (inactivas).',
-    v_tablas, v_plantillas;
+  RAISE EXCEPTION 'SIMULACRO OK — nada quedo aplicado. % tablas verificadas sin ninguna fila escrita, % plantillas nuevas (inactivas). %',
+    v_tablas, v_plantillas, v_medicion;
+`;
+
+const FIN_REAL_DO = `${MEDICIONES}
+  RAISE NOTICE 'PASE APLICADO. %', v_medicion;
 `;
 
 const FIN_REAL = `
@@ -488,27 +604,44 @@ function salida(modo) {
   const pasos = piezas(modo).map(([nombre, sql], i) => {
     const tag = `$pase_${String(i).padStart(2, '0')}$`;
     if (sql.includes('$pase_')) throw new Error(`${nombre}: contiene el delimitador reservado $pase_`);
+    // El primer bloqueo que frena a los usuarios es el ALTER TABLE del PASO 0:
+    // desde ahi se cuenta la ventana de bloqueo.
+    const marcaBloqueo = nombre.startsWith('PASO 0') ? '  v_t_bloqueo := clock_timestamp();\n' : '';
     return `
   -- ##########################################################################
   -- ${nombre}
   -- ##########################################################################
   v_paso := ${lit(nombre)};
+${marcaBloqueo}  v_t := clock_timestamp();
   EXECUTE ${tag}
 ${sql.trim()}
 ${tag};
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 `;
   }).join('');
 
   return `${ENCABEZADO(modo)}
 DO $pase_entrega_a$
 DECLARE
-  v_paso       text := 'inicio';
-  v_tablas     bigint;
-  v_plantillas bigint;
+  v_paso        text := 'inicio';
+  v_tablas      bigint;
+  v_plantillas  bigint;
+  v_t_inicio    timestamptz := clock_timestamp();
+  v_t_bloqueo   timestamptz;
+  v_t           timestamptz;
+  v_nombres     text[] := '{}';
+  v_duraciones  numeric[] := '{}';
+  v_bloqueo     numeric;
+  v_total       numeric;
+  v_lentos      text;
+  v_sin_archivo bigint;
+  v_medicion    text;
 BEGIN
-  -- Si una tabla esta en uso, cancelar en vez de hacer esperar a los usuarios.
+  -- Tope de ESPERA para conseguir cada bloqueo (no de retencion): si una tabla
+  -- esta en uso, se cancela todo en vez de encolar a los usuarios detras.
   PERFORM set_config('lock_timeout', '3s', true);
-${pasos}${modo === 'simulacro' ? FIN_SIMULACRO : ''}
+${pasos}${modo === 'simulacro' ? FIN_SIMULACRO : FIN_REAL_DO}
 EXCEPTION WHEN OTHERS THEN
   -- Cualquier error deshace la sentencia ENTERA; esto solo agrega en que paso fue.
   RAISE EXCEPTION USING

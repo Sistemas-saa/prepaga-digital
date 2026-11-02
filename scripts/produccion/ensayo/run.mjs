@@ -24,8 +24,15 @@ const adaptar = (sql) => {
   if (n !== 1) throw new Error('pg_cron: ' + n);
   return sql.replace('CREATE EXTENSION IF NOT EXISTS pg_cron;', '-- (pg_cron simulado)');
 };
-const REAL = adaptar(readFileSync(`${REPO}/sql/produccion-entrega-a.sql`, 'utf8'));
-const SIMU = adaptar(readFileSync(`${REPO}/sql/produccion-entrega-a-SIMULACRO.sql`, 'utf8'));
+// Tal como sale del generador: con el esquema APROBADO de prod, que el mock no
+// replica entero. Sirve para probar que la precondicion de esquema aborta.
+const REAL_CON_REF_PROD = adaptar(readFileSync(`${REPO}/sql/produccion-entrega-a.sql`, 'utf8'));
+const SIMU_CON_REF_PROD = adaptar(readFileSync(`${REPO}/sql/produccion-entrega-a-SIMULACRO.sql`, 'utf8'));
+const ESQUEMA_RE = /\$esquema_ref\$[\s\S]*?\$esquema_ref\$/;
+for (const s of [REAL_CON_REF_PROD, SIMU_CON_REF_PROD]) {
+  if ((s.match(new RegExp(ESQUEMA_RE.source, 'g')) || []).length !== 1) throw new Error('referencia de esquema: se esperaba 1');
+}
+let REAL, SIMU; // con la referencia reemplazada por el esquema del mock (abajo)
 
 let fallas = 0;
 const ok = (cond, msg) => { console.log(`${cond ? 'OK  ' : 'FAIL'} ${msg}`); if (!cond) fallas++; };
@@ -59,13 +66,44 @@ async function correr(db, sql) {
   catch (e) { try { await db.exec('ROLLBACK'); } catch {} return { ok: false, msg: e.message }; }
 }
 
+// El resto del ensayo corre con la referencia de esquema = el esquema del mock,
+// calculada con la misma expresion que usa el script.
+{
+  const db = await fresh();
+  const filas = (await db.query(`select c.relname || '.' || a.attname || ':' || format_type(a.atttypid, a.atttypmod) AS x
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+      join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+     where c.relkind in ('r', 'p') order by 1`)).rows.map((r) => r.x);
+  const ref = `$esquema_ref$${filas.join('\n')}$esquema_ref$`;
+  REAL = REAL_CON_REF_PROD.replace(ESQUEMA_RE, () => ref);
+  SIMU = SIMU_CON_REF_PROD.replace(ESQUEMA_RE, () => ref);
+}
+
+// 0. PRECONDICION DE ESQUEMA ---------------------------------------------------
+{
+  console.log('\n== 0. ESQUEMA DISTINTO DEL APROBADO');
+  const db = await fresh();
+  const antes = await foto(db);
+  const r = await correr(db, REAL_CON_REF_PROD);
+  ok(!r.ok && /ESQUEMA DISTINTO DEL APROBADO/.test(r.msg), `la base del mock no es el esquema de prod: aborta -> ${r.msg?.slice(0, 160)}`);
+  const despues = await foto(db, antes.columnas);
+  ok(JSON.stringify(antes.datos) === JSON.stringify(despues.datos) && JSON.stringify(antes.tablas) === JSON.stringify(despues.tablas),
+    'y no queda nada aplicado');
+  const db2 = await fresh();
+  await db2.exec('ALTER TABLE public.clients ADD COLUMN columna_que_prod_no_tiene text;');
+  const r2 = await correr(db2, REAL);
+  ok(!r2.ok && /Sobran 1: clients\.columna_que_prod_no_tiene:text/.test(r2.msg), `una sola columna de mas tambien aborta -> ${r2.msg?.slice(0, 160)}`);
+}
+
 // 1. SIMULACRO -----------------------------------------------------------------
 {
   console.log('\n== 1. SIMULACRO');
   const db = await fresh();
   const antes = await foto(db);
   const r = await correr(db, SIMU);
-  ok(!r.ok && r.msg.startsWith('SIMULACRO OK'), `termina con SIMULACRO OK -> ${r.msg?.slice(0, 160)}`);
+  ok(!r.ok && r.msg.startsWith('SIMULACRO OK'), `termina con SIMULACRO OK -> ${r.msg?.slice(0, 400)}`);
+  ok(/Tablas bloqueadas \d+(\.\d+)? s/.test(r.msg ?? '') && /Pasos mas lentos: /.test(r.msg ?? ''), 'informa la ventana de bloqueo y los pasos mas lentos');
+  ok(/db push: BLOQUEADO por la CLI \(1 versiones/.test(r.msg ?? ''), 'informa que db push sigue bloqueado (el mock tiene 1 version sin archivo)');
   const despues = await foto(db, antes.columnas);
   ok(JSON.stringify(antes.datos) === JSON.stringify(despues.datos), 'datos identicos despues del simulacro');
   ok(JSON.stringify(antes.tablas) === JSON.stringify(despues.tablas), 'mismas tablas (no quedo nada creado)');
@@ -126,11 +164,25 @@ async function correr(db, sql) {
 }
 
 // 4. Sabotajes: la guarda tiene que atraparlos ---------------------------------
+// Primero, que el sabotaje del contrato sea de verdad invisible para una
+// comparacion por tamano: misma longitud y mismo pg_column_size.
+{
+  const db = await fresh();
+  const q = `select length(content) l, pg_column_size(content) s, md5(content) h from public.documents`;
+  const a = (await db.query(q)).rows[0];
+  await db.exec(`UPDATE public.documents SET content = replace(content, 'firma', 'firmb');`);
+  const b = (await db.query(q)).rows[0];
+  ok(a.l === b.l && a.s === b.s && a.h !== b.h, `el cambio de contenido conserva longitud (${a.l}) y tamano almacenado (${a.s} -> ${b.s})`);
+}
 const sabotajes = [
   ['UPDATE con los MISMOS valores sobre una venta abierta', `UPDATE public.sales SET total_amount = total_amount WHERE contract_number = '2026-000300';`],
   ['UPDATE con los MISMOS valores sobre adherentes (lo frena el guard de firmados)', `UPDATE public.beneficiaries SET amount = amount;`],
   ['un nombre pasado a minuscula', `UPDATE public.clients SET first_name = lower(first_name) WHERE dni = '111';`],
   ['borrar una notificacion', `DELETE FROM public.notifications;`],
+  // El hueco de la guarda anterior (valores grandes comparados por tamano): el
+  // contrato firmado cambia de contenido y conserva longitud y tamano almacenado.
+  ['contenido de un contrato cambiado conservando el tamano', `UPDATE public.documents SET content = replace(content, 'firma', 'firmb');`],
+  ['DROP COLUMN de una columna preexistente (no escribe filas)', `ALTER TABLE public.notifications DROP COLUMN link;`],
   ['plantilla sembrada activa', null],
 ];
 for (const [nombre, sql] of sabotajes) {
