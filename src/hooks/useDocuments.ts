@@ -14,37 +14,22 @@ interface UseDocumentsListParams {
   search?: string;
 }
 
+/**
+ * Sólo mutaciones (crear / actualizar / borrar documentos).
+ *
+ * ⚠️ Este hook NO lista documentos, a propósito. Hasta 2026-11 hacía además un
+ * `select('*', sales(...))` de TODA la tabla `documents` —sin filtro ni límite,
+ * con el HTML completo de cada uno (~240 MB en BR prod, docs de hasta 11 MB por
+ * las imágenes base64)— y se disparaba con sólo montar la página Documentos,
+ * aunque esa página sólo usaba `createDocument`/`deleteDocument`. Eso agotó el
+ * Disk IO Budget del t4g.micro el 2026-11-03 (base colgada ~45 min).
+ *
+ * Para listar: `useDocumentsList` (paginado, sin `content`).
+ * Para ver uno: `useDocument(id)`.
+ */
 export const useDocuments = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { user, loading } = useSimpleAuthContext();
-
-  const { data: documents, isLoading, error } = useQuery({
-    queryKey: ["documents", user?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("documents")
-        .select(`
-          *,
-          sales:sale_id(
-            id, 
-            status, 
-            contract_number,
-            clients:client_id(first_name, last_name),
-            plans:plan_id(name)
-          )
-        `)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      return data;
-    },
-    retry: 2,
-    enabled: !loading && !!user,
-    staleTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: true,
-  });
 
   const createDocumentMutation = useMutation({
     mutationFn: async (document: DocumentInsert) => {
@@ -132,9 +117,6 @@ export const useDocuments = () => {
   });
 
   return {
-    documents,
-    isLoading,
-    error,
     createDocument: createDocumentMutation.mutate,
     updateDocument: updateDocumentMutation.mutate,
     deleteDocument: deleteDocumentMutation.mutate,

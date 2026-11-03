@@ -133,14 +133,20 @@ const SignatureWorkflow = () => {
     };
   }, [saleId, queryClient]);
 
-  // Fetch documents for this sale
+  // Fetch documents for this sale.
+  // ⚠️ Sin `content` ni `signature_data`, a propósito: esta query se refresca con
+  // cada evento realtime y con el polling de 60s, y un contrato puede pesar varios
+  // MB por las imágenes base64. Con `select('*')` una sola pestaña abierta en
+  // Gestionar Firma releía MB del disco por minuto, y eso ayudó a agotar el Disk
+  // IO Budget de BR prod el 2026-11-03. El HTML se pide recién al descargarlo
+  // (`fetchDocumentContent`), y sólo si no hay PDF.
   const { data: signedDocs = [] } = useQuery({
     queryKey: ['signed-documents', saleId],
     queryFn: async () => {
       if (!saleId) return [];
       const { data, error } = await supabase
         .from('documents')
-        .select('*')
+        .select('id, name, document_type, status, is_final, beneficiary_id, created_at, signed_at, file_url, signed_pdf_url, base_pdf_url, evidence_certificate_url')
         .eq('sale_id', saleId)
         .eq('is_final', true)
         .neq('document_type', 'firma')
@@ -322,6 +328,19 @@ const SignatureWorkflow = () => {
     }
   };
 
+  const fetchDocumentContent = async (documentId: string): Promise<string | null> => {
+    const { data, error } = await supabase
+      .from('documents')
+      .select('content')
+      .eq('id', documentId)
+      .maybeSingle();
+    if (error) {
+      console.error('[SignatureWorkflow] no se pudo leer el contenido del documento', error);
+      return null;
+    }
+    return data?.content ?? null;
+  };
+
   const handleDownloadContent = async (doc: any) => {
     if (!doc) return;
     const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -357,8 +376,14 @@ const SignatureWorkflow = () => {
       } catch {}
     }
 
-    // Tier 3: último recurso — contenido HTML crudo, con branding armado en el momento
-    if (!doc.content) return;
+    // Tier 3: último recurso — contenido HTML crudo, con branding armado en el momento.
+    // La lista no trae `content` (ver la query de signedDocs): se pide acá, uno solo.
+    const content = doc.content ?? await fetchDocumentContent(doc.id);
+    if (!content) {
+      toast.error('El documento no tiene un PDF ni contenido para descargar');
+      return;
+    }
+    doc = { ...doc, content };
     const headerImg = (companySettings as any)?.pdf_header_image_url || '';
     const footerImg = (companySettings as any)?.pdf_footer_image_url || '';
     const htmlContent = `<!doctype html>
@@ -508,7 +533,9 @@ const SignatureWorkflow = () => {
       // Fallback
       if (doc.file_url) {
         await openDocumentFile(doc.file_url);
-      } else if (doc.content) {
+      } else {
+        // signedDocs no trae `content`: handleDownloadContent prueba signed → base →
+        // HTML pedido en el momento, y avisa con un toast si no hay nada.
         await handleDownloadContent(doc);
       }
     }
@@ -1222,7 +1249,10 @@ const SignatureWorkflow = () => {
                   const beneficiary = doc.beneficiary_id
                     ? beneficiaries?.find((b: any) => b.id === doc.beneficiary_id)
                     : null;
-                  const canDownload = doc.file_url || doc.content;
+                  // La lista no trae `content`, así que no se puede saber acá si hay HTML.
+                  // Son contratos/DDJJ finales generados desde plantilla: siempre lo tienen,
+                  // y si no, handleDownloadContent avisa con un toast.
+                  const canDownload = true;
 
                   return (
                     <div key={doc.id} className="border rounded-lg p-3 flex items-center justify-between">
