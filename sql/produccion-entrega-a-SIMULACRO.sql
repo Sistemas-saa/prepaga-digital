@@ -4923,11 +4923,96 @@ $pase_26$;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
   -- ##########################################################################
+  -- 20261109000001_sales_titular_amount_exime_operaciones_y_empresa.sql
+  -- ##########################################################################
+  v_paso := '20261109000001_sales_titular_amount_exime_operaciones_y_empresa.sql';
+  v_t := clock_timestamp();
+  EXECUTE $pase_27$
+-- ============================================================================
+-- Monto del titular > 0: exigirlo sólo donde corresponde
+-- ============================================================================
+-- BR prod tiene un CHECK que no está en ninguna migración del repo (se creó
+-- directo en la base):
+--
+--   sales_titular_amount_positive_when_active
+--   CHECK (status IN ('borrador','cancelado','rechazado')
+--          OR (titular_amount IS NOT NULL AND titular_amount > 0))
+--
+-- Es correcto para una venta a persona física, pero bloquea dos casos que el
+-- módulo de anexos y el de empresa crean CON titular_amount NULL/0 a propósito:
+--
+--   * ventas-operación (sale_type 'alta_adherente' / 'cambio_plan'): no cobran
+--     un titular, cobran el anexo; la baja además va en 0;
+--   * ventas a EMPRESA (clients.client_type = 'empresa'): la empresa no es
+--     beneficiaria de sí misma, titular_amount = 0 y el total es la nómina.
+--
+-- Con el CHECK, esas ventas no pueden salir de 'borrador': "Enviar documentos"
+-- no las pasa a 'enviado' y, peor, la ÚLTIMA firma revienta dentro de
+-- auto_advance_sale_status (23514) y el anexo nunca se activa. Se detectó al
+-- ensayar el pase sobre un clon de prod (2026-11-09).
+--
+-- Un CHECK no puede mirar clients, así que la regla pasa a un trigger con la
+-- MISMA condición para persona física y las dos excepciones. El trigger se crea
+-- ANTES de soltar el CHECK, en la misma transacción: no hay ventana sin regla.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.validate_sales_titular_amount()
+RETURNS trigger
+LANGUAGE plpgsql
+-- SECURITY DEFINER: la excepción de empresa lee clients, y quien dispara la
+-- actualización puede no ver esa fila por RLS (p. ej. el firmante anónimo vía
+-- auto_advance_sale_status). Sólo lee; search_path fijo.
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF NEW.status IN ('borrador', 'cancelado', 'rechazado') THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.titular_amount IS NOT NULL AND NEW.titular_amount > 0 THEN
+    RETURN NEW;
+  END IF;
+
+  -- Venta-operación: el importe es el del anexo, no el de un titular.
+  IF COALESCE(NEW.sale_type, '') IN ('alta_adherente', 'cambio_plan') THEN
+    RETURN NEW;
+  END IF;
+
+  -- Venta a empresa: la empresa no cobra como titular; el total es la nómina.
+  IF EXISTS (SELECT 1 FROM public.clients c
+              WHERE c.id = NEW.client_id AND c.client_type = 'empresa') THEN
+    RETURN NEW;
+  END IF;
+
+  RAISE EXCEPTION 'La venta % no puede pasar a "%" sin monto del titular (titular_amount debe ser mayor a 0).',
+                  COALESCE(NEW.contract_number, NEW.id::text), NEW.status
+    USING ERRCODE = '23514',
+          HINT = 'Cargá el Monto Titular / Plan en la pestaña Básico. Sólo los anexos y las ventas a empresa pueden ir con 0.';
+END;
+$$;
+
+COMMENT ON FUNCTION public.validate_sales_titular_amount() IS
+  'Reemplaza al CHECK sales_titular_amount_positive_when_active: fuera de borrador/cancelado/rechazado exige titular_amount > 0, salvo ventas-operación (alta_adherente, cambio_plan) y ventas a empresa.';
+
+REVOKE ALL ON FUNCTION public.validate_sales_titular_amount() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS trg_sales_validate_titular_amount ON public.sales;
+CREATE TRIGGER trg_sales_validate_titular_amount
+  BEFORE INSERT OR UPDATE OF status, titular_amount, sale_type, client_id ON public.sales
+  FOR EACH ROW EXECUTE FUNCTION public.validate_sales_titular_amount();
+
+ALTER TABLE public.sales DROP CONSTRAINT IF EXISTS sales_titular_amount_positive_when_active;
+$pase_27$;
+  v_nombres := v_nombres || v_paso;
+  v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
+
+  -- ##########################################################################
   -- verificacion, guarda de datos e historial
   -- ##########################################################################
   v_paso := 'verificacion, guarda de datos e historial';
   v_t := clock_timestamp();
-  EXECUTE $pase_27$
+  EXECUTE $pase_28$
 -- ############################################################################
 -- VERIFICACION — aborta si falta algo
 -- ############################################################################
@@ -4945,7 +5030,7 @@ BEGIN
     END IF;
   END LOOP;
 
-  FOREACH v_x IN ARRAY ARRAY['beneficiaries.trg_beneficiaries_block_when_sale_signed', 'beneficiaries.trg_beneficiaries_validate_nomina', 'sales.trg_activate_adherent_incorporation', 'sales.trg_activate_plan_change', 'adherent_incorporations.trg_adherent_incorporations_guard_lifecycle', 'plan_changes.trg_plan_changes_guard_lifecycle']::text[] LOOP
+  FOREACH v_x IN ARRAY ARRAY['beneficiaries.trg_beneficiaries_block_when_sale_signed', 'beneficiaries.trg_beneficiaries_validate_nomina', 'sales.trg_activate_adherent_incorporation', 'sales.trg_activate_plan_change', 'adherent_incorporations.trg_adherent_incorporations_guard_lifecycle', 'plan_changes.trg_plan_changes_guard_lifecycle', 'sales.trg_sales_validate_titular_amount']::text[] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_trigger
                     WHERE tgrelid = format('public.%I', split_part(v_x, '.', 1))::regclass
                       AND tgname = split_part(v_x, '.', 2) AND NOT tgisinternal) THEN
@@ -4981,6 +5066,13 @@ BEGIN
   IF (SELECT prosrc FROM pg_proc WHERE oid = 'public.generate_contract_number()'::regprocedure)
      NOT LIKE '%alta_adherente%' THEN
     v_faltas := v_faltas || 'generate_contract_number sin las series de anexos'::text;
+  END IF;
+
+  -- Sin esto, ningún anexo ni venta a empresa sale de borrador ni se firma.
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conrelid = 'public.sales'::regclass
+                AND conname = 'sales_titular_amount_positive_when_active') THEN
+    v_faltas := v_faltas || 'sigue el CHECK sales_titular_amount_positive_when_active'::text;
   END IF;
 
   IF to_regclass('cron.job') IS NOT NULL
@@ -5117,12 +5209,13 @@ BEGIN
       ('20260910000001', 'sales_contract_end_date', ARRAY['-- aplicada por sql/produccion-entrega-a.sql (variante de prod)']),
       ('20260910000002', 'notify_expiring_sales', ARRAY['-- aplicada por sql/produccion-entrega-a.sql (variante de prod)']),
       ('20260910000003', 'schedule_notify_expiring_sales', ARRAY['-- aplicada por sql/produccion-entrega-a.sql (variante de prod)']),
-      ('20260910000004', 'alta_empleado_con_adherentes', ARRAY['-- aplicada por sql/produccion-entrega-a.sql (variante de prod)'])
+      ('20260910000004', 'alta_empleado_con_adherentes', ARRAY['-- aplicada por sql/produccion-entrega-a.sql (variante de prod)']),
+      ('20261109000001', 'sales_titular_amount_exime_operaciones_y_empresa', ARRAY['-- aplicada por sql/produccion-entrega-a.sql (variante de prod)'])
     ON CONFLICT (version) DO NOTHING;
   END IF;
 END
 $hist$;
-$pase_27$;
+$pase_28$;
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -5133,7 +5226,7 @@ $pase_27$;
     FROM (SELECT n, d FROM unnest(v_nombres, v_duraciones) u(n, d) ORDER BY d DESC LIMIT 3) s;
   IF to_regclass('supabase_migrations.schema_migrations') IS NOT NULL THEN
     EXECUTE 'SELECT count(*) FROM supabase_migrations.schema_migrations WHERE version <> ALL ($1)'
-      INTO v_sin_archivo USING ARRAY['20250710182447', '20250710192711', '20250711110418', '20250715193438', '20250715195259', '20250715205545', '20250716144836', '20250716153716', '20250716155645', '20250716161248', '20250716162259', '20250716210249', '20250717002333', '20250717151249', '20250717170712', '20250717171225', '20250717195407', '20250717201311', '20250718125307', '20250725221720', '20250727181607', '20250730114958', '20250731123927', '20250731125815', '20250801111126', '20250801112733', '20250801140726', '20250803231059', '20250807125437', '20250807150749', '20250811204601', '20250812124915', '20250813123552', '20250814113907', '20250818131139', '20260203023846', '20260203023945', '20260203024758', '20260203114224', '20260203132328', '20260204022658', '20260205193814', '20260205194053', '20260205194128', '20260205203420', '20260206124854', '20260209130156', '20260209132845', '20260209171351', '20260209173731', '20260209181719', '20260209181922', '20260209191333', '20260209210415', '20260210120000', '20260210130000', '20260210143000', '20260211000000', '20260211100000', '20260211100001', '20260211180635', '20260211183409', '20260211183809', '20260211185141', '20260211192246', '20260211193726', '20260211200856', '20260211201657', '20260211202857', '20260213185108', '20260215030225', '20260215030640', '20260216120000', '20260218215303', '20260219013511', '20260219123301', '20260219130000', '20260220191434', '20260223120000', '20260223153000', '20260224120000', '20260224184412', '20260224201035', '20260224203002', '20260224203435', '20260225135136', '20260225152638', '20260226133225', '20260226163113', '20260226164303', '20260226172651', '20260226174702', '20260227004522', '20260304004143', '20260304112449', '20260304112557', '20260304120000', '20260304133819', '20260304141401', '20260304141708', '20260305211955', '20260306171942', '20260306174522', '20260306174644', '20260308022010', '20260308055116', '20260310120000', '20260313122252', '20260313202614', '20260313204145', '20260313204230', '20260313204443', '20260313204627', '20260313211823', '20260313211913', '20260313212022', '20260316191713', '20260316201341', '20260318005826', '20260318021419', '20260318022449', '20260318212246', '20260318212319', '20260318214336', '20260318214356', '20260319154519', '20260320115908', '20260320121637', '20260320132936', '20260320161525', '20260325103000', '20260325104500', '20260325105000', '20260330120000', '20260331012519', '20260331012616', '20260331021912', '20260331023708', '20260331121915', '20260331142943', '20260331161407', '20260331223756', '20260331230901', '20260401003748', '20260402203606', '20260404235832', '20260406153000', '20260407144448', '20260414000000', '20260414000001', '20260414000002', '20260416103000', '20260804175027', '20260804175810', '20260804190000', '20260804200000', '20260804210000', '20260804220000', '20260813000001', '20260813000002', '20260813000003', '20260817000001', '20260817000002', '20260818000001', '20260818000002', '20260818000003', '20260819000001', '20260819000002', '20260819000003', '20260819210000', '20260821120000', '20260822000001', '20260822000002', '20260822000003', '20260908000001', '20260908000002', '20260908000003', '20260908000004', '20260908000005', '20260908000006', '20260909000001', '20260909000002', '20260910000001', '20260910000002', '20260910000003', '20260910000004', '20261007000001']::text[];
+      INTO v_sin_archivo USING ARRAY['20250710182447', '20250710192711', '20250711110418', '20250715193438', '20250715195259', '20250715205545', '20250716144836', '20250716153716', '20250716155645', '20250716161248', '20250716162259', '20250716210249', '20250717002333', '20250717151249', '20250717170712', '20250717171225', '20250717195407', '20250717201311', '20250718125307', '20250725221720', '20250727181607', '20250730114958', '20250731123927', '20250731125815', '20250801111126', '20250801112733', '20250801140726', '20250803231059', '20250807125437', '20250807150749', '20250811204601', '20250812124915', '20250813123552', '20250814113907', '20250818131139', '20260203023846', '20260203023945', '20260203024758', '20260203114224', '20260203132328', '20260204022658', '20260205193814', '20260205194053', '20260205194128', '20260205203420', '20260206124854', '20260209130156', '20260209132845', '20260209171351', '20260209173731', '20260209181719', '20260209181922', '20260209191333', '20260209210415', '20260210120000', '20260210130000', '20260210143000', '20260211000000', '20260211100000', '20260211100001', '20260211180635', '20260211183409', '20260211183809', '20260211185141', '20260211192246', '20260211193726', '20260211200856', '20260211201657', '20260211202857', '20260213185108', '20260215030225', '20260215030640', '20260216120000', '20260218215303', '20260219013511', '20260219123301', '20260219130000', '20260220191434', '20260223120000', '20260223153000', '20260224120000', '20260224184412', '20260224201035', '20260224203002', '20260224203435', '20260225135136', '20260225152638', '20260226133225', '20260226163113', '20260226164303', '20260226172651', '20260226174702', '20260227004522', '20260304004143', '20260304112449', '20260304112557', '20260304120000', '20260304133819', '20260304141401', '20260304141708', '20260305211955', '20260306171942', '20260306174522', '20260306174644', '20260308022010', '20260308055116', '20260310120000', '20260313122252', '20260313202614', '20260313204145', '20260313204230', '20260313204443', '20260313204627', '20260313211823', '20260313211913', '20260313212022', '20260316191713', '20260316201341', '20260318005826', '20260318021419', '20260318022449', '20260318212246', '20260318212319', '20260318214336', '20260318214356', '20260319154519', '20260320115908', '20260320121637', '20260320132936', '20260320161525', '20260325103000', '20260325104500', '20260325105000', '20260330120000', '20260331012519', '20260331012616', '20260331021912', '20260331023708', '20260331121915', '20260331142943', '20260331161407', '20260331223756', '20260331230901', '20260401003748', '20260402203606', '20260404235832', '20260406153000', '20260407144448', '20260414000000', '20260414000001', '20260414000002', '20260416103000', '20260804175027', '20260804175810', '20260804190000', '20260804200000', '20260804210000', '20260804220000', '20260813000001', '20260813000002', '20260813000003', '20260817000001', '20260817000002', '20260818000001', '20260818000002', '20260818000003', '20260819000001', '20260819000002', '20260819000003', '20260819210000', '20260821120000', '20260822000001', '20260822000002', '20260822000003', '20260908000001', '20260908000002', '20260908000003', '20260908000004', '20260908000005', '20260908000006', '20260909000001', '20260909000002', '20260910000001', '20260910000002', '20260910000003', '20260910000004', '20261007000001', '20261109000001']::text[];
   END IF;
   v_medicion := format('Tablas bloqueadas %s s (desde el PASO 0 hasta el final; total %s s). Pasos mas lentos: %s. '
                        || 'db push: %s.',

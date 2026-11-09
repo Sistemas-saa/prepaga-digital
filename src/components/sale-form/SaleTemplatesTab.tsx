@@ -873,11 +873,19 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
         if (!check.allowed) throw new Error(check.reasons.join(', '));
       }
 
-      // Update sale status to 'enviado'
-      await supabase
+      // Update sale status to 'enviado'. El error NO se puede ignorar: si la base
+      // rechaza el cambio (p. ej. la regla de monto del titular), la venta queda en
+      // borrador con enlaces ya creados y la última firma fallaría después, lejos de
+      // acá. Mostrarlo ahora es lo único que deja al usuario corregirlo a tiempo.
+      const { error: statusError } = await supabase
         .from('sales')
         .update({ status: 'enviado' } as any)
         .eq('id', saleId);
+      if (statusError) {
+        throw new Error(
+          `Los documentos se generaron, pero la venta no pudo pasar a "Enviado": ${statusError.message}`
+        );
+      }
 
       queryClient.invalidateQueries({ queryKey: ['sale', saleId] });
       queryClient.invalidateQueries({ queryKey: ['sales-list'] });

@@ -154,6 +154,12 @@ INSERT INTO public.templates (company_id, name, content) VALUES
   ('0a1dc0e5-7378-4d14-b7bc-646b3e652bc6', 'Contrato', repeat('<p>contrato grande</p>', 2000)),
   ('0a1dc0e5-7378-4d14-b7bc-646b3e652bc6', 'DDJJ', '<p>ddjj</p>');
 
+-- CHECK que prod tiene y el repo no (relevado en el clon el 2026-11-09). Sin él
+-- en el mock, el ensayo no podía ver que bloqueaba anexos y ventas a empresa.
+ALTER TABLE public.sales ADD CONSTRAINT sales_titular_amount_positive_when_active
+  CHECK (status = ANY (ARRAY['borrador'::sale_status, 'cancelado'::sale_status, 'rechazado'::sale_status])
+         OR (titular_amount IS NOT NULL AND titular_amount > 0::numeric));
+
 -- Las 3 conocidas: titular sin fila primaria + un adherente con el mismo monto.
 INSERT INTO public.sales (id, company_id, client_id, plan_id, salesperson_id, status, contract_number, titular_amount, total_amount) VALUES
   ('dddddddd-0000-0000-0000-000000000109', '0a1dc0e5-7378-4d14-b7bc-646b3e652bc6', 'cccccccc-0000-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'completado', '2026-000109', 90000, 0),

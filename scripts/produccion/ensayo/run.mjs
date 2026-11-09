@@ -140,7 +140,7 @@ async function correr(db, sql) {
   const aud = (await db.query(`select count(*)::int n from audit_logs`)).rows[0].n;
   ok(aud === antes.datos.audit_logs.length, `audit_logs no crecio (${antes.datos.audit_logs.length} -> ${aud})`);
   const mig = (await db.query(`select count(*)::int n from supabase_migrations.schema_migrations`)).rows[0].n;
-  ok(mig === 25, `historial: 1 previa + 24 registradas (${mig})`);
+  ok(mig === 26, `historial: 1 previa + 25 registradas (${mig})`);
   const cron = (await db.query(`select count(*)::int n from cron.job where jobname='notify-expiring-sales'`)).rows[0].n;
   ok(cron === 1, 'job notify-expiring-sales agendado');
 
@@ -156,6 +156,20 @@ async function correr(db, sql) {
   const nueva = await correr(db, `insert into sales (company_id, status, sale_type) values ('0a1dc0e5-7378-4d14-b7bc-646b3e652bc6','borrador','venta_nueva')`);
   const nro = (await db.query(`select contract_number from sales order by created_at desc, contract_number desc limit 1`)).rows[0].contract_number;
   ok(nueva.ok && nro === '2026-000301', `numeracion de contratos sigue la serie (${nro})`);
+
+  // Monto del titular: el CHECK de prod se reemplaza por un trigger con excepciones
+  const chk = (await db.query(`select count(*)::int n from pg_constraint where conname = 'sales_titular_amount_positive_when_active'`)).rows[0].n;
+  ok(chk === 0, 'el CHECK sales_titular_amount_positive_when_active ya no existe');
+  const op = await correr(db, `insert into sales (id, company_id, status, sale_type) values ('dddddddd-0000-0000-0000-00000000a001','0a1dc0e5-7378-4d14-b7bc-646b3e652bc6','borrador','alta_adherente');
+                               update sales set status = 'completado' where id = 'dddddddd-0000-0000-0000-00000000a001'`);
+  ok(op.ok, `una venta-operacion (titular NULL) puede completarse ${op.ok ? '' : op.msg}`);
+  const emp = await correr(db, `insert into clients (id, company_id, first_name, last_name, client_type) values ('cccccccc-0000-0000-0000-00000000e001','0a1dc0e5-7378-4d14-b7bc-646b3e652bc6','EMPRESA','SA','empresa');
+                                insert into sales (id, company_id, client_id, status, titular_amount) values ('dddddddd-0000-0000-0000-00000000e001','0a1dc0e5-7378-4d14-b7bc-646b3e652bc6','cccccccc-0000-0000-0000-00000000e001','borrador',0);
+                                update sales set status = 'enviado' where id = 'dddddddd-0000-0000-0000-00000000e001'`);
+  ok(emp.ok, `una venta a empresa (titular 0) puede enviarse ${emp.ok ? '' : emp.msg}`);
+  const per = await correr(db, `insert into sales (id, company_id, client_id, status, titular_amount) values ('dddddddd-0000-0000-0000-00000000f001','0a1dc0e5-7378-4d14-b7bc-646b3e652bc6','cccccccc-0000-0000-0000-000000000002','borrador',0);
+                                update sales set status = 'enviado' where id = 'dddddddd-0000-0000-0000-00000000f001'`);
+  ok(!per.ok && /sin monto del titular/.test(per.msg), `persona fisica sin monto del titular sigue bloqueada -> ${per.msg?.slice(0, 90)}`);
 
   // 3. Reejecucion
   console.log('\n== 3. REEJECUCION');

@@ -144,6 +144,9 @@ const MIGRACIONES = [
   ['20260908000004'], ['20260908000005'], ['20260908000006', A5_plantillasInactivas],
   ['20260909000001'], ['20260909000002'],
   ['20260910000001'], ['20260910000002'], ['20260910000003'], ['20260910000004'],
+  // Hallado al ensayar sobre el clon: prod tiene un CHECK (fuera del repo) que
+  // impedía enviar y firmar anexos y ventas a empresa.
+  ['20261109000001'],
 ];
 
 // Las migraciones terminan con SELECTs de verificacion pensados para test. En
@@ -368,6 +371,7 @@ const TRIGGERS_ESPERADOS = [
   'sales.trg_activate_plan_change',
   'adherent_incorporations.trg_adherent_incorporations_guard_lifecycle',
   'plan_changes.trg_plan_changes_guard_lifecycle',
+  'sales.trg_sales_validate_titular_amount',
 ];
 
 const VERIFICACION = `
@@ -424,6 +428,13 @@ BEGIN
   IF (SELECT prosrc FROM pg_proc WHERE oid = 'public.generate_contract_number()'::regprocedure)
      NOT LIKE '%alta_adherente%' THEN
     v_faltas := v_faltas || 'generate_contract_number sin las series de anexos'::text;
+  END IF;
+
+  -- Sin esto, ningún anexo ni venta a empresa sale de borrador ni se firma.
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conrelid = 'public.sales'::regclass
+                AND conname = 'sales_titular_amount_positive_when_active') THEN
+    v_faltas := v_faltas || 'sigue el CHECK sales_titular_amount_positive_when_active'::text;
   END IF;
 
   IF to_regclass('cron.job') IS NOT NULL
