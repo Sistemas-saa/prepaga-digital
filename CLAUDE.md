@@ -48,10 +48,10 @@ desplegada. Redesplegar (ver *Comandos Útiles*).
 > Si volvés a modificar este archivo, que sea con intención — no como efecto colateral de
 > un deploy de Lovable.
 
-> ⚠️ **Eso es cierto en `codex/incorporacion-entrega-a`, no en `main`** (relevado el
-> 2026-11-02): la v82 entró en `af7ba59`, que sólo está en esa rama, y en `main` sigue la
-> versión de Lovable (`headerTemplate`). Hasta que se mergee, **no desplegar
-> `generate-base-pdf` desde `main`**.
+> Desde el **2026-11-15** (PR #9) la v82 también está en `main` de `DaltonP93` y de
+> `Sistemas-saa`. Hasta esa fecha `main` tenía la versión rota de Lovable; si alguna vez
+> se trabaja sobre un `main` anterior a `3e119d2`, **no desplegar `generate-base-pdf`
+> desde ahí**.
 
 ---
 
@@ -85,7 +85,8 @@ desplegada. Redesplegar (ver *Comandos Útiles*).
 |---|---|---|
 | `generate-base-pdf` | **82** | ⚠️ ADMINISTRADA EXTERNAMENTE — no tocar |
 | `finalize-signature-link` | 56 | Activa contratada, notifica titular vía WhatsApp |
-| `generate-pdf` | 57 | Preview PDF con branding base64 |
+| `generate-pdf` | 58 | Preview PDF con branding base64. **`verify_jwt: true`** en prod (el `config.toml` dice false: no desplegar por CLI sin flag) |
+| `compose-template-pdf` | 52 | RUC/razón social para empresas (2026-11-15) |
 | `create-user` | 55 | Timeout 8s en auth.getUser, deduplicación doble-click |
 | `signature-otp` | 57 | OTP WhatsApp vía WAHA, API key desde DB |
 | `get-document-download-url` | 51 | Prioriza print_versions sobre signed_pdf_url |
@@ -212,24 +213,34 @@ la plantilla y el anexo no se podría emitir nunca.
 
 | | US test (`ykducvvcjzdpoojxlsig`) | BR prod (`ejiycfqxgtrzaysgpzmx`) |
 |---|---|---|
-| `adherent_incorporations`, `plan_changes` | ✅ | ❌ **no existen** |
-| `beneficiaries.entry_date` / `.immediate_coverage` | ✅ | ❌ |
-| `clients.external_id`, `sales.employee_signature_mode` | ✅ | ❌ |
-| Plantillas de los 3 formularios | ✅ | ❌ |
-| Nómina de empresa (`beneficiaries.member_role` / `.parent_beneficiary_id` / `.plan_id`) | ✅ | ❌ |
-| Movimientos alta/baja (`adherent_incorporations.movement_type` y sus 8 columnas) | ✅ | ❌ |
-| `clients.hr_contact_*` y las 2 plantillas de empresa | ✅ | ❌ |
+| `adherent_incorporations`, `plan_changes` | ✅ | ✅ (2026-11-15) |
+| `beneficiaries.entry_date` / `.immediate_coverage` / `.status` / `.coverage_end_date` | ✅ | ✅ |
+| `clients.external_id`, `sales.employee_signature_mode` | ✅ | ✅ |
+| Plantillas de los 3 formularios | ✅ | ✅ sembradas **inactivas** hasta el front nuevo |
+| Nómina de empresa (`beneficiaries.member_role` / `.parent_beneficiary_id` / `.plan_id`) | ✅ | ✅ |
+| Movimientos alta/baja (`adherent_incorporations.movement_type` y sus 8 columnas) | ✅ | ✅ |
+| `clients.hr_contact_*` y las 2 plantillas de empresa | ✅ | ✅ (plantillas inactivas) |
+| CHECK `sales_titular_amount_positive_when_active` → trigger `trg_sales_validate_titular_amount` | ? | ✅ |
+| Comisiones (`commission_*`) | ✅ | ❌ **segunda vuelta** |
 
-> ⚠️ **El módulo NO está en producción.** Llevarlo requiere las migraciones
-> `20260813*`, `20260817*`, `20260818*`, `20260819*`, `20260822*` y `20260908*`,
-> más las columnas de arriba. Es un trabajo aparte, con su propio runbook.
+> **Aplicado en BR prod el 2026-11-15** con `sql/produccion-entrega-a.sql` (pegado en el
+> SQL Editor; 0,46 s de bloqueo; guarda `ctid`+`xmin`: ninguna fila preexistente escrita).
+> Prod quedó byte a byte igual al clon ensayado (md5 de columnas, funciones, triggers,
+> constraints, políticas y plantillas). Vuelta atrás sin backup:
+> `sql/produccion-entrega-a-REVERSO.sql` (interruptores, no borra nada; probado).
+> **Las 10 plantillas se activan recién con el front nuevo arriba**: el front viejo lista
+> toda plantilla activa sin filtrar por empresa (las mostraría duplicadas). Detalle en
+> `docs/runbooks/produccion-entrega-a.md` §13.
+>
+> ⚠️ **Antes de cargar anexos** sobre 2026-000109, 000191 o 000207: su total guardado
+> difiere de la fórmula y la activación lo duplicaría. Decisión de negocio pendiente.
 
 ---
 
 ## Venta a EMPRESA: nómina de empleados y movimientos de alta/baja
 
-> Aplicado el **2026-09-08** (migraciones `20260908000001`…`20260908000006`).
-> **Sólo en US test.** Ver *Estado por entorno*.
+> Aplicado el **2026-09-08** en US test (migraciones `20260908000001`…`20260908000006`) y
+> el **2026-11-15** en BR prod. Ver *Estado por entorno*.
 
 ### El modelo: UN contrato, empleados anidados
 
