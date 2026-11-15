@@ -522,7 +522,7 @@ recién después una decisión de producción separada.
 
 ## 13. Ejecución en producción (2026-11-15)
 
-**Base: APLICADA.** Edge functions: desplegadas. Front: código en los dos `main`, falta el rebuild.
+**COMPLETO.** Base, edge functions, front (build `2026-11-15T17:32Z`) y las 10 plantillas activadas.
 
 | Paso | Resultado |
 |---|---|
@@ -537,9 +537,12 @@ recién después una decisión de producción separada.
 
 ### Falta
 
-1. **Rebuild del front en Portainer** (etiquetar antes la imagen actual como `pre-entrega-a`) y verificar
-   `build-version.json`.
-2. **Recién con el front nuevo arriba**, activar las 10 plantillas (§11, paso 5: se esperan 10 filas).
+1. ~~Rebuild del front~~ — hecho (14:32 PY). `build-version.json` dice `commit: unknown` porque el
+   rebuild no recibió `GIT_COMMIT`; se verificó por contenido del bundle (Movimientos, Comisiones, tablas
+   nuevas) y que sólo apunta a `ejiycfqxgtrzaysgpzmx`. Probado: dashboard, detalle, guard de adherentes,
+   Movimientos, Comisiones "Módulo no habilitado"; edge_logs sin errores (salvo 404 esperado de
+   `commission_settings`).
+2. ~~Activar las 10 plantillas~~ — hecho, exactamente 10 filas; contenido idéntico al clon ensayado.
 3. Avisar a los admins: ya no se editan adherentes de contratos firmados (va por *Movimientos*).
 4. Decidir el total de 2026-000109 / 000191 / 000207 antes de cargarles anexos.
 5. Borrar el clon `prepaga-clon-2026-11-15` cuando ya no haga falta (cuesta por hora) y el archivo

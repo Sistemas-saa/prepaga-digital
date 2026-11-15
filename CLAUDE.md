@@ -216,10 +216,10 @@ la plantilla y el anexo no se podría emitir nunca.
 | `adherent_incorporations`, `plan_changes` | ✅ | ✅ (2026-11-15) |
 | `beneficiaries.entry_date` / `.immediate_coverage` / `.status` / `.coverage_end_date` | ✅ | ✅ |
 | `clients.external_id`, `sales.employee_signature_mode` | ✅ | ✅ |
-| Plantillas de los 3 formularios | ✅ | ✅ sembradas **inactivas** hasta el front nuevo |
+| Plantillas de los 3 formularios | ✅ | ✅ activas desde el 2026-11-15 |
 | Nómina de empresa (`beneficiaries.member_role` / `.parent_beneficiary_id` / `.plan_id`) | ✅ | ✅ |
 | Movimientos alta/baja (`adherent_incorporations.movement_type` y sus 8 columnas) | ✅ | ✅ |
-| `clients.hr_contact_*` y las 2 plantillas de empresa | ✅ | ✅ (plantillas inactivas) |
+| `clients.hr_contact_*` y las 2 plantillas de empresa | ✅ | ✅ |
 | CHECK `sales_titular_amount_positive_when_active` → trigger `trg_sales_validate_titular_amount` | ? | ✅ |
 | Comisiones (`commission_*`) | ✅ | ❌ **segunda vuelta** |
 
@@ -228,9 +228,9 @@ la plantilla y el anexo no se podría emitir nunca.
 > Prod quedó byte a byte igual al clon ensayado (md5 de columnas, funciones, triggers,
 > constraints, políticas y plantillas). Vuelta atrás sin backup:
 > `sql/produccion-entrega-a-REVERSO.sql` (interruptores, no borra nada; probado).
-> **Las 10 plantillas se activan recién con el front nuevo arriba**: el front viejo lista
-> toda plantilla activa sin filtrar por empresa (las mostraría duplicadas). Detalle en
-> `docs/runbooks/produccion-entrega-a.md` §13.
+> Front nuevo desplegado el mismo día (build `2026-11-15T17:32Z`) y recién entonces se
+> activaron las 10 plantillas: el front viejo lista toda plantilla activa sin filtrar por
+> empresa. Detalle en `docs/runbooks/produccion-entrega-a.md` §13.
 >
 > ⚠️ **Antes de cargar anexos** sobre 2026-000109, 000191 o 000207: su total guardado
 > difiere de la fórmula y la activación lo duplicaría. Decisión de negocio pendiente.
