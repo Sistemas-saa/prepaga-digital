@@ -82,7 +82,9 @@ END;
 $function$
 $f1$;
 
-    EXECUTE $f2$
+    -- La definicion de prod tiene 3 lineas en blanco con DOS espacios. Los
+    -- editores los borran y el md5 de abajo no daria: van marcados como <<2SP>>.
+    EXECUTE replace($f2$
 CREATE OR REPLACE FUNCTION public.generate_contract_number()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -95,19 +97,19 @@ DECLARE
   next_number INTEGER;
 BEGIN
   year_part := TO_CHAR(CURRENT_DATE, 'YYYY');
-
+<<2SP>>
   SELECT COALESCE(MAX(CAST(SUBSTRING(contract_number FROM 6 FOR 6) AS INTEGER)), 0) + 1
   INTO next_number
   FROM public.sales
   WHERE contract_number LIKE year_part || '-%';
-
+<<2SP>>
   sequence_part := LPAD(next_number::TEXT, 6, '0');
   NEW.contract_number := year_part || '-' || sequence_part;
-
+<<2SP>>
   RETURN NEW;
 END;
 $function$
-$f2$;
+$f2$, chr(60)||chr(60)||'2SP'||chr(62)||chr(62), '  ');
 
     IF md5(pg_get_functiondef('public.recalculate_sale_total_amount()'::regprocedure)) <> 'aa9f429b75481a3dd6819e23db5d35b2'
        OR md5(pg_get_functiondef('public.generate_contract_number()'::regprocedure)) <> '2d81e357d4a61c4f3c1929f726a90648' THEN
