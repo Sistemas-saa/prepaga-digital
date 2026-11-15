@@ -7,7 +7,10 @@ import {
   type CommissionPeriodPdf,
 } from "./commission-html.ts";
 
-const US_PROJECT_REF = "ykducvvcjzdpoojxlsig";
+// Antes estaba fijada a US test (fase de pruebas). Desde el 2026-11-15 corre en el
+// proyecto donde se despliega (US test o BR prod): las imagenes de branding solo se
+// aceptan del Storage PUBLICO de ese mismo proyecto (proteccion contra SSRF).
+const SUPABASE_HOST_RE = /^[a-z0-9]{20}\.supabase\.co$/;
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
 const corsHeaders = {
@@ -23,7 +26,7 @@ function json(status: number, body: Record<string, unknown>): Response {
   });
 }
 
-async function imageToDataUri(rawUrl: string | null): Promise<string | null> {
+async function imageToDataUri(rawUrl: string | null, projectHost: string): Promise<string | null> {
   if (!rawUrl) return null;
   let url: URL;
   try {
@@ -33,7 +36,7 @@ async function imageToDataUri(rawUrl: string | null): Promise<string | null> {
   }
   if (
     url.protocol !== "https:" ||
-    url.hostname !== `${US_PROJECT_REF}.supabase.co` ||
+    url.hostname !== projectHost ||
     !url.pathname.startsWith("/storage/v1/object/public/")
   ) return null;
   const response = await fetch(url, {
@@ -85,8 +88,8 @@ Deno.serve(async (req) => {
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   let runtimeHost = "";
   try { runtimeHost = new URL(supabaseUrl).hostname; } catch { /* handled below */ }
-  if (runtimeHost !== `${US_PROJECT_REF}.supabase.co`) {
-    return json(503, { error: "This function is restricted to the US test project" });
+  if (!SUPABASE_HOST_RE.test(runtimeHost)) {
+    return json(500, { error: "Supabase URL not configured" });
   }
   if (!anonKey || !serviceRoleKey) return json(500, { error: "Supabase credentials not configured" });
 
@@ -161,8 +164,8 @@ Deno.serve(async (req) => {
     if (!items?.length) return json(409, { error: "The period has no commission items" });
 
     const [headerDataUri, footerDataUri] = await Promise.all([
-      imageToDataUri(settings?.pdf_header_image_url ?? null),
-      imageToDataUri(settings?.pdf_footer_image_url ?? null),
+      imageToDataUri(settings?.pdf_header_image_url ?? null, runtimeHost),
+      imageToDataUri(settings?.pdf_footer_image_url ?? null, runtimeHost),
     ]);
     const branding: CommissionBrandingPdf = {
       company_name: company?.name ?? "Empresa",
