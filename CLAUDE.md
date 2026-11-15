@@ -87,6 +87,7 @@ desplegada. Redesplegar (ver *Comandos Útiles*).
 | `finalize-signature-link` | 56 | Activa contratada, notifica titular vía WhatsApp |
 | `generate-pdf` | 58 | Preview PDF con branding base64. **`verify_jwt: true`** en prod (el `config.toml` dice false: no desplegar por CLI sin flag) |
 | `compose-template-pdf` | 52 | RUC/razón social para empresas (2026-11-15) |
+| `generate-commission-pdf` | 1 | PDF de liquidación (2026-11-15). `verify_jwt: false` (valida sesión y rol adentro). Ya no está fijada a US test: corre en el proyecto donde se despliega |
 | `create-user` | 55 | Timeout 8s en auth.getUser, deduplicación doble-click |
 | `signature-otp` | 57 | OTP WhatsApp vía WAHA, API key desde DB |
 | `get-document-download-url` | 51 | Prioriza print_versions sobre signed_pdf_url |
@@ -221,7 +222,7 @@ la plantilla y el anexo no se podría emitir nunca.
 | Movimientos alta/baja (`adherent_incorporations.movement_type` y sus 8 columnas) | ✅ | ✅ |
 | `clients.hr_contact_*` y las 2 plantillas de empresa | ✅ | ✅ |
 | CHECK `sales_titular_amount_positive_when_active` → trigger `trg_sales_validate_titular_amount` | ? | ✅ |
-| Comisiones (`commission_*`) | ✅ | ❌ **segunda vuelta** |
+| Comisiones (`commission_*`) | ✅ | ✅ **modo prueba** desde el 2026-11-15 (ver *Módulo de Comisiones*) |
 
 > **Aplicado en BR prod el 2026-11-15** con `sql/produccion-entrega-a.sql` (pegado en el
 > SQL Editor; 0,46 s de bloqueo; guarda `ctid`+`xmin`: ninguna fila preexistente escrita).
@@ -1186,7 +1187,19 @@ contratada_signature_mode: link
 contratada_signer_phone: 976122957
 ```
 
-## Módulo de Comisiones (solo en US test — NO está en producción)
+## Módulo de Comisiones
+
+> **BR prod: instalado y habilitado en MODO PRUEBA el 2026-11-15.** Pase con
+> `sql/produccion-comisiones.sql` (generado por `scripts/produccion/build-comisiones.mjs`: 12
+> migraciones 100 % aditivas, guarda `ctid`+`xmin`, ensayado en el clon y simulacro en prod) y
+> habilitación con `sql/produccion-comisiones-HABILITAR.sql`: módulo encendido, prefijo
+> **`PRUEBA-`** y los 6 planes como `INDIVIDUAL` (valor inicial, sin pantalla: se corrige por SQL).
+> Regla del modo prueba: **no Cerrar ni Pagar** liquidaciones hasta validar contra la planilla
+> manual. Para pasar a real: anular desde la pantalla las `PRUEBA-…` y correr
+> `sql/produccion-comisiones-MODO-REAL.sql` (prefijo `LIQ-`, número 1). Apagar al instante:
+> `UPDATE commission_settings SET is_enabled=false` (no borra nada). Ojo: no usar el panel
+> *Configuración* para habilitar desde cero (arranca con `LIQ-`).
+> Un ítem de liquidación (aun en borrador) bloquea borrar esa venta (`ON DELETE RESTRICT`).
 
 > Estado al 2026-08-04: desplegado **únicamente** en `ykducvvcjzdpoojxlsig` (US test).
 > En BR producción las tablas **no existen**. Plan y runbook completos en
