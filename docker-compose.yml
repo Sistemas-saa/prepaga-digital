@@ -4,6 +4,12 @@
     build:
       context: .
       dockerfile: Dockerfile
+      # Etiqueta de version para /build-version.json. En Portainer: Stack ->
+      # Environment variables -> GIT_COMMIT = SHA corto de main (git log -1 --format=%h).
+      # Sin la variable queda "unknown", igual que antes: no cambia nada mas.
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GIT_BRANCH: ${GIT_BRANCH:-main}
     pull_policy: build
     ports:
       - "8080:80"
