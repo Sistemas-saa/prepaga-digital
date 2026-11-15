@@ -439,7 +439,14 @@ En ambos casos el PDF firmado no se regenera y queda diciendo otra cosa que la b
 Si algún día se escriben de verdad los estados `sent`/`signed` del anexo, esta
 guarda puede simplificarse — hasta entonces, no sacarla.
 
-### ⚠️ La RLS de `templates` no aísla por empresa
+### ⚠️ La RLS de `templates` no aísla por empresa — **sólo en US test**
+
+> **BR prod ya está bien** (verificado el 2026-11-15, sólo lectura): ahí la política se
+> llama **"Gestors can manage company templates"** y exige
+> `company_id = get_user_company_id(auth.uid()) AND (admin OR gestor)`, o `super_admin`.
+> Todos los usuarios de prod son de "SAMAP Prepaga Digital" (la otra empresa no tiene
+> usuarios ni ventas), 0 ediciones cruzadas en 252 versiones. **No hay nada que aplicar
+> en prod.** Lo que sigue describe US test.
 
 La política **"Gestors can manage templates"** es `FOR ALL` con
 `USING (has_role(super_admin) OR has_role(admin) OR has_role(gestor))` —
@@ -456,9 +463,8 @@ la venta) y filtra `availableTemplates` por ella. Es lo correcto para todos los
 roles, super_admin incluido: el selector de UNA venta debe ofrecer sólo las
 plantillas de SU empresa.
 
-> La RLS sigue permisiva. Arreglarla es un cambio de seguridad aparte: habría
-> que scopear esa política por `company_id` y verificar que no rompa al
-> super_admin ni al diseñador de plantillas.
+> En US test la RLS sigue permisiva. Para alinearla con prod alcanza con copiar la
+> política de prod (`pg_policies` de `templates` en `ejiycfqxgtrzaysgpzmx`).
 
 ### Deuda conocida de este módulo
 
