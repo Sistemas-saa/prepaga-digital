@@ -624,9 +624,14 @@ function salida(modo) {
   -- ##########################################################################
   v_paso := ${lit(nombre)};
 ${marcaBloqueo}  v_t := clock_timestamp();
-  EXECUTE ${tag}
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \\r. Las migraciones no tienen \\r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace(${tag}
 ${sql.trim()}
-${tag};
+${tag}, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 `;
