@@ -517,3 +517,39 @@ listo. Estado de cada punto:
 
 La recomendación de la revisión se mantiene: **preparación y ensayo sobre una copia aislada**, y
 recién después una decisión de producción separada.
+
+---
+
+## 13. Ejecución en producción (2026-11-15)
+
+**Base: APLICADA.** Edge functions: desplegadas. Front: código en los dos `main`, falta el rebuild.
+
+| Paso | Resultado |
+|---|---|
+| Backup | Clon `prepaga-clon-2026-11-15` (*Restore to new project* del backup diario) y dump local en `C:\Programacion\CNAM\SAMAP\backups\prod-2026-11-15\` (339 ventas, 416 beneficiarios, 2602 documentos). Cero IO sobre prod |
+| Ensayo sobre el clon (psql) | SIMULACRO OK (0,45 s) · PASE APLICADO (0,17 s) · REVERSO simulado OK |
+| Simulacro en prod (SQL Editor) | 1er intento abortó en la precondición sin aplicar nada: el editor pega con CRLF. Corregido en el generador (`replace(…, chr(13), '')` por paso). 2º intento: **SIMULACRO OK, 0,46 s** |
+| Pase real en prod (SQL Editor) | **PASE APLICADO**. Prod quedó byte a byte igual al clon ensayado (md5 de columnas, funciones, triggers, constraints, políticas y de las 10 plantillas); conteos y suma de totales idénticos; 705 documentos firmados intactos |
+| Front viejo contra la base nueva | Probado en prod: dashboard, ventas, detalle, documentos y vista del contrato firmado; todas las consultas 200 |
+| Edge functions | `generate-pdf` v58 (`verify_jwt: true`), `compose-template-pdf` v52 (`false`); las dos arrancan. `generate-base-pdf` sigue en v82 (`table-header-group`) |
+| Git | PR #9 y #10 mergeados: `DaltonP93/main` = `Sistemas-saa/main` = `8e769e1` (fast-forward desde `6853893`) |
+| Controles bug #13 | 0 / 0 / 0. Los 9 links de contratada con step 1 son históricos (anteriores al guard del 19/08) |
+
+### Falta
+
+1. **Rebuild del front en Portainer** (etiquetar antes la imagen actual como `pre-entrega-a`) y verificar
+   `build-version.json`.
+2. **Recién con el front nuevo arriba**, activar las 10 plantillas (§11, paso 5: se esperan 10 filas).
+3. Avisar a los admins: ya no se editan adherentes de contratos firmados (va por *Movimientos*).
+4. Decidir el total de 2026-000109 / 000191 / 000207 antes de cargarles anexos.
+5. Borrar el clon `prepaga-clon-2026-11-15` cuando ya no haga falta (cuesta por hora) y el archivo
+   `backups\clon2-pass.txt`.
+
+### Vuelta atrás
+
+| Falla | Acción |
+|---|---|
+| Algo del módulo nuevo se comporta mal | `sql/produccion-entrega-a-REVERSO.sql` (modo simulacro por defecto; cambiar `v_simulacro` a `false`). Restaura las 2 funciones reemplazadas byte a byte, apaga 4 triggers y el cron, desactiva las plantillas. No borra nada |
+| Edge function | Redesplegar el archivo de `6853893` (`git show 6853893:supabase/functions/<fn>/index.ts`) con el mismo `verify_jwt` |
+| Front nuevo | Volver a la imagen `pre-entrega-a` en Portainer |
+| Base irrecuperable | Restore del backup / dump `prod-2026-11-15` (pierde lo cargado después) |
