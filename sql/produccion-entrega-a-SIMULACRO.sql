@@ -65,7 +65,12 @@ BEGIN
   -- ##########################################################################
   v_paso := '0.a precondiciones';
   v_t := clock_timestamp();
-  EXECUTE $pase_00$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_00$
 -- 0.a Precondiciones: que sea prod y que el pase no se haya aplicado
 DO $pre$
 BEGIN
@@ -1077,7 +1082,7 @@ BEGIN
   END IF;
 END
 $esquema$;
-$pase_00$;
+$pase_00$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -1086,7 +1091,12 @@ $pase_00$;
   -- ##########################################################################
   v_paso := '0.b foto antes';
   v_t := clock_timestamp();
-  EXECUTE $pase_01$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_01$
 -- 0.b Foto "antes", en un esquema propio que se borra al final
 CREATE SCHEMA pe_scratch;
 
@@ -1141,7 +1151,7 @@ INSERT INTO pe_scratch.esperado
 SELECT 'plantillas_nuevas',
        (SELECT count(*) FROM public.companies) * 5
        - (SELECT count(*) FROM public.templates WHERE name = ANY (ARRAY['Anexo de Incorporación de Adherente', 'Formulario de Solicitud de Cambio de Plan', 'Anexo Especial de Vigencia Inmediata', 'Contrato Colectivo de Empresa', 'Anexo de Movimiento de Nomina']::text[]));
-$pase_01$;
+$pase_01$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -1151,7 +1161,12 @@ $pase_01$;
   v_paso := 'PASO 0 (A1)';
   v_t_bloqueo := clock_timestamp();
   v_t := clock_timestamp();
-  EXECUTE $pase_02$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_02$
 -- PASO 0 (A1) — columnas que ninguna migracion crea y prod no tiene.
 -- Con DEFAULT constante: en PG 17 no reescribe la tabla ni dispara triggers, y
 -- deja a las filas existentes en 'active' sin un UPDATE. Por eso el
@@ -1175,7 +1190,7 @@ $chk$;
 -- activate_adherent_incorporation. Sin ella, la primera baja falla.
 ALTER TABLE public.beneficiaries
   ADD COLUMN IF NOT EXISTS coverage_end_date date;
-$pase_02$;
+$pase_02$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -1184,7 +1199,12 @@ $pase_02$;
   -- ##########################################################################
   v_paso := '20260813000001_adherent_incorporation_schema.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_03$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_03$
 -- =====================================================================
 -- Fase 0 — Esquema para "Incorporación de Adherente" y "Empresas titular"
 -- Fecha: 2026-08-13
@@ -1385,7 +1405,7 @@ BEGIN
       CHECK (employee_signature_mode IN ('individual','representante'));
   END IF;
 END $$;
-$pase_03$;
+$pase_03$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -1394,7 +1414,12 @@ $pase_03$;
   -- ##########################################################################
   v_paso := '20260813000002_incorporacion_varios_adherentes.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_04$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_04$
 -- =====================================================================
 -- Fase 2 — Ajuste: un Anexo puede incorporar VARIAS personas
 -- Fecha: 2026-08-13
@@ -1524,7 +1549,7 @@ BEGIN
   RETURN NEW;
 END;
 $function$;
-$pase_04$;
+$pase_04$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -1533,7 +1558,12 @@ $pase_04$;
   -- ##########################################################################
   v_paso := '20260813000003_activacion_incorporacion.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_05$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_05$
 -- =====================================================================
 -- Fase 2 — Activación automática de la Incorporación de Adherente
 -- Fecha: 2026-08-13
@@ -1715,7 +1745,7 @@ CREATE TRIGGER trg_activate_adherent_incorporation
 AFTER UPDATE ON public.sales
 FOR EACH ROW
 EXECUTE FUNCTION public.activate_adherent_incorporation();
-$pase_05$;
+$pase_05$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -1724,7 +1754,12 @@ $pase_05$;
   -- ##########################################################################
   v_paso := '20260817000001_fix_incorporacion_status_vocabulario.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_06$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_06$
 -- Fix: el trigger escribia en adherent_incorporations un estado que la tabla rechaza.
 --
 -- adherent_incorporations usa vocabulario en INGLES:
@@ -1836,7 +1871,7 @@ BEGIN
   RETURN NEW;
 END;
 $function$;
-$pase_06$;
+$pase_06$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -1845,7 +1880,12 @@ $pase_06$;
   -- ##########################################################################
   v_paso := '20260817000002_sales_maternity_bonus.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_07$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_07$
 -- Plan Materno como ADICIONAL de la venta, no como plan propio.
 --
 -- Definición del negocio: el Plan Materno va siempre ligado a otro plan; no se
@@ -1870,7 +1910,7 @@ COMMENT ON COLUMN public.sales.maternity_bonus IS
 -- esta condición en reportes.
 CREATE INDEX IF NOT EXISTS idx_sales_maternity_bonus
   ON public.sales (company_id) WHERE maternity_bonus;
-$pase_07$;
+$pase_07$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -1879,7 +1919,12 @@ $pase_07$;
   -- ##########################################################################
   v_paso := '20260818000001_fix_total_amount_single_source.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_08$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_08$
 -- Fuente unica de verdad para sales.total_amount.
 --
 -- PROBLEMA
@@ -1955,7 +2000,7 @@ BEGIN
   END LOOP;
   RAISE NOTICE 'ventas cuyo total difiere de la formula (no se tocaron): %', v_n;
 END $$;
-$pase_08$;
+$pase_08$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -1964,7 +2009,12 @@ $pase_08$;
   -- ##########################################################################
   v_paso := '20260818000002_beneficiaries_signed_contract_guard.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_09$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_09$
 -- Respaldo en la base del bloqueo de adherentes en contratos firmados.
 --
 -- Con el contrato firmado, la composición del grupo familiar ya quedó sellada en
@@ -2115,7 +2165,7 @@ CREATE TRIGGER trg_beneficiaries_block_when_sale_signed
   BEFORE INSERT OR UPDATE OR DELETE ON public.beneficiaries
   FOR EACH ROW
   EXECUTE FUNCTION public.beneficiaries_block_when_sale_signed();
-$pase_09$;
+$pase_09$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -2124,7 +2174,12 @@ $pase_09$;
   -- ##########################################################################
   v_paso := '20260818000003_adherent_incorporation_lifecycle.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_10$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_10$
 -- Ciclo de vida de una Incorporación de Adherente.
 --
 -- Hasta ahora el frontend no tenía ni edición ni cancelación: un error de tipeo
@@ -2192,7 +2247,7 @@ CREATE TRIGGER trg_adherent_incorporations_guard_lifecycle
   BEFORE UPDATE ON public.adherent_incorporations
   FOR EACH ROW
   EXECUTE FUNCTION public.adherent_incorporations_guard_lifecycle();
-$pase_10$;
+$pase_10$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -2201,7 +2256,12 @@ $pase_10$;
   -- ##########################################################################
   v_paso := '20260819000001_plan_change_schema.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_11$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_11$
 -- =====================================================================
 -- Fase 0 — Esquema para "Cambio de Plan" (FORMULARIO DE SOLICITUD DE CAMBIO)
 -- Fecha: 2026-08-19
@@ -2411,7 +2471,7 @@ BEGIN
   RETURN NEW;
 END;
 $function$;
-$pase_11$;
+$pase_11$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -2420,7 +2480,12 @@ $pase_11$;
   -- ##########################################################################
   v_paso := '20260819000002_plan_change_activation.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_12$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_12$
 -- =====================================================================
 -- Fase 2 — Activación automática del "Cambio de Plan" + guarda de ciclo de vida
 -- Fecha: 2026-08-19
@@ -2705,7 +2770,7 @@ CREATE TRIGGER trg_plan_changes_guard_lifecycle
   BEFORE UPDATE ON public.plan_changes
   FOR EACH ROW
   EXECUTE FUNCTION public.plan_changes_guard_lifecycle();
-$pase_12$;
+$pase_12$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -2714,7 +2779,12 @@ $pase_12$;
   -- ##########################################################################
   v_paso := '20260822000001_templates_unique_name_por_empresa.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_13$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_13$
 -- =====================================================================
 -- Nombre único de plantilla por empresa
 -- Fecha: 2026-08-22
@@ -2771,7 +2841,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_templates_company_name
 
 COMMENT ON INDEX public.uq_templates_company_name IS
   'Nombre de plantilla único por empresa. Habilita el ON CONFLICT del seed de plantillas de tipos de venta (20260822000002).';
-$pase_13$;
+$pase_13$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -2780,7 +2850,12 @@ $pase_13$;
   -- ##########################################################################
   v_paso := '20260822000002_seed_plantillas_tipos_venta.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_14$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_14$
 -- =====================================================================
 -- Seed de las plantillas de los 3 tipos de venta
 -- Fecha: 2026-08-22
@@ -3171,7 +3246,7 @@ BEGIN
   END IF;
 END
 $seed$;
-$pase_14$;
+$pase_14$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -3180,7 +3255,12 @@ $pase_14$;
   -- ##########################################################################
   v_paso := '20260908000001_beneficiaries_nomina_empresa.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_15$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_15$
 -- Nómina de un contrato de EMPRESA: empleados con plan propio y adherentes a cargo.
 --
 -- POR QUÉ
@@ -3357,7 +3437,7 @@ CREATE TRIGGER trg_beneficiaries_validate_nomina
 -- PostgREST cachea el esquema: sin esto los embeds de plan_id y del padre
 -- siguen fallando hasta el próximo reinicio del servicio.
 NOTIFY pgrst, 'reload schema';
-$pase_15$;
+$pase_15$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -3366,7 +3446,12 @@ $pase_15$;
   -- ##########################################################################
   v_paso := '20260908000002_clients_contacto_rrhh.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_16$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_16$
 -- Contacto de RR.HH. del cliente EMPRESA.
 --
 -- POR QUÉ
@@ -3393,7 +3478,7 @@ COMMENT ON COLUMN public.clients.hr_contact_name IS
   'Contacto de RR.HH. de un cliente empresa: con quien se gestionan altas y bajas de nomina. NULL para personas fisicas.';
 
 NOTIFY pgrst, 'reload schema';
-$pase_16$;
+$pase_16$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -3402,7 +3487,12 @@ $pase_16$;
   -- ##########################################################################
   v_paso := '20260908000003_adherent_incorporations_movimientos.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_17$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_17$
 -- Movimientos de nómina: `adherent_incorporations` pasa a cubrir ALTA y BAJA.
 --
 -- POR QUÉ ACÁ Y NO EN UNA TABLA NUEVA
@@ -3557,7 +3647,7 @@ CREATE TRIGGER trg_adherent_incorporations_guard_lifecycle
   EXECUTE FUNCTION public.adherent_incorporations_guard_lifecycle();
 
 NOTIFY pgrst, 'reload schema';
-$pase_17$;
+$pase_17$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -3566,7 +3656,12 @@ $pase_17$;
   -- ##########################################################################
   v_paso := '20260908000004_total_amount_excluye_bajas.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_18$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_18$
 -- `sales.total_amount` deja de contar a los beneficiarios dados de baja.
 --
 -- POR QUÉ
@@ -3709,7 +3804,7 @@ BEGIN
   RAISE NOTICE 'Control OK: el filtro por status no cambia ningun total calculado.';
 END
 $control$;
-$pase_18$;
+$pase_18$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -3718,7 +3813,12 @@ $pase_18$;
   -- ##########################################################################
   v_paso := '20260908000005_activate_incorporation_movimientos.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_19$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_19$
 -- Activación de los movimientos de nómina: la baja desvincula, el alta suma.
 --
 -- POR QUÉ SE REEMPLAZA `activate_adherent_incorporation()` Y NO SE CREA OTRA
@@ -3914,7 +4014,7 @@ $function$;
 
 -- El trigger no se recrea: sigue siendo el mismo `trg_activate_adherent_incorporation`
 -- (AFTER UPDATE ON sales) apuntando a esta función, que conserva nombre y firma.
-$pase_19$;
+$pase_19$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -3923,7 +4023,12 @@ $pase_19$;
   -- ##########################################################################
   v_paso := '20260908000006_seed_plantillas_empresa.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_20$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_20$
 -- =====================================================================
 -- Seed de las plantillas del contrato de EMPRESA y del anexo de movimiento
 -- Fecha: 2026-09-08
@@ -4313,7 +4418,7 @@ BEGIN
   END IF;
 END
 $seed$;
-$pase_20$;
+$pase_20$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -4322,7 +4427,12 @@ $pase_20$;
   -- ##########################################################################
   v_paso := '20260909000001_beneficiaries_opciones_por_empleado.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_21$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_21$
 -- ============================================================================
 -- Opciones por EMPLEADO en la nomina de un contrato de empresa
 -- ============================================================================
@@ -4375,7 +4485,7 @@ UPDATE public.beneficiaries e
    AND NOT EXISTS (SELECT 1 FROM public.sales s
                     WHERE s.id = e.sale_id
                       AND s.status IN ('firmado','completado'));
-$pase_21$;
+$pase_21$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -4384,7 +4494,12 @@ $pase_21$;
   -- ##########################################################################
   v_paso := '20260909000002_beneficiaries_sin_titular_en_empresa.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_22$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_22$
 -- ============================================================================
 -- Una venta de EMPRESA no lleva beneficiario titular
 -- ============================================================================
@@ -4462,7 +4577,7 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-$pase_22$;
+$pase_22$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -4471,7 +4586,12 @@ $pase_22$;
   -- ##########################################################################
   v_paso := '20260910000001_sales_contract_end_date.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_23$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_23$
 -- ============================================================================
 -- Fin de vigencia del contrato (sales.contract_end_date)
 -- ============================================================================
@@ -4511,7 +4631,7 @@ COMMENT ON COLUMN public.sales.contract_end_date IS
 CREATE INDEX IF NOT EXISTS idx_sales_contract_end_date
   ON public.sales (contract_end_date)
   WHERE contract_end_date IS NOT NULL;
-$pase_23$;
+$pase_23$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -4520,7 +4640,12 @@ $pase_23$;
   -- ##########################################################################
   v_paso := '20260910000002_notify_expiring_sales.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_24$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_24$
 -- ============================================================================
 -- Aviso al vendedor: falta 1 mes para que venza la vigencia del contrato
 -- ============================================================================
@@ -4654,7 +4779,7 @@ REVOKE ALL ON FUNCTION public.notify_expiring_sales(integer) FROM PUBLIC, anon, 
 
 -- El agendado va en 20260910000003, en su propio archivo a proposito: ver el
 -- encabezado de esa migracion.
-$pase_24$;
+$pase_24$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -4663,7 +4788,12 @@ $pase_24$;
   -- ##########################################################################
   v_paso := '20260910000003_schedule_notify_expiring_sales.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_25$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_25$
 -- ============================================================================
 -- Agendado diario del aviso de vencimiento (pg_cron)
 -- ============================================================================
@@ -4705,7 +4835,7 @@ SELECT cron.schedule(
   '0 12 * * *',
   $$SELECT public.notify_expiring_sales(30);$$
 );
-$pase_25$;
+$pase_25$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -4714,7 +4844,12 @@ $pase_25$;
   -- ##########################################################################
   v_paso := '20260910000004_alta_empleado_con_adherentes.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_26$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_26$
 -- ============================================================================
 -- Alta de un EMPLEADO junto con sus ADHERENTES en un solo movimiento
 -- ============================================================================
@@ -4918,7 +5053,7 @@ END;
 $function$;
 -- El trigger ya existe (trg_activate_adherent_incorporation ON sales) y no
 -- se recrea: se reemplaza sólo el cuerpo de la función.
-$pase_26$;
+$pase_26$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -4927,7 +5062,12 @@ $pase_26$;
   -- ##########################################################################
   v_paso := '20261109000001_sales_titular_amount_exime_operaciones_y_empresa.sql';
   v_t := clock_timestamp();
-  EXECUTE $pase_27$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_27$
 -- ============================================================================
 -- Monto del titular > 0: exigirlo sólo donde corresponde
 -- ============================================================================
@@ -5003,7 +5143,7 @@ CREATE TRIGGER trg_sales_validate_titular_amount
   FOR EACH ROW EXECUTE FUNCTION public.validate_sales_titular_amount();
 
 ALTER TABLE public.sales DROP CONSTRAINT IF EXISTS sales_titular_amount_positive_when_active;
-$pase_27$;
+$pase_27$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
@@ -5012,7 +5152,12 @@ $pase_27$;
   -- ##########################################################################
   v_paso := 'verificacion, guarda de datos e historial';
   v_t := clock_timestamp();
-  EXECUTE $pase_28$
+  -- replace(chr(13)): el SQL Editor del dashboard en Windows convierte los
+  -- saltos de linea a CRLF al pegar. Sin esto, la referencia de esquema no
+  -- coincide (paso el 2026-11-15, abortando sin aplicar nada) y las funciones
+  -- y plantillas quedarian con \r. Las migraciones no tienen \r propios (el
+  -- generador las normaliza), asi que esto solo saca lo que agrega el editor.
+  EXECUTE replace($pase_28$
 -- ############################################################################
 -- VERIFICACION — aborta si falta algo
 -- ############################################################################
@@ -5215,7 +5360,7 @@ BEGIN
   END IF;
 END
 $hist$;
-$pase_28$;
+$pase_28$, chr(13), '');
   v_nombres := v_nombres || v_paso;
   v_duraciones := v_duraciones || extract(epoch FROM clock_timestamp() - v_t)::numeric;
 
