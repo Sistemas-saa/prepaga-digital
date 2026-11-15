@@ -18,6 +18,7 @@ import { es } from 'date-fns/locale';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { excludeIncorporationSales } from '@/lib/saleFilters';
 
 interface ReportConfig {
   id?: string;
@@ -168,6 +169,10 @@ const ReportsManager = () => {
       plans(name, price),
       companies(name)
     `);
+
+    // Las operaciones de incorporación de adherente no son ventas comerciales:
+    // no deben aparecer en los reportes ni sumar a los totales.
+    query = excludeIncorporationSales(query);
 
     // Aplicar filtros
     if (config.filters.dateFrom) {

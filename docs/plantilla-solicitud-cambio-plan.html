@@ -1,0 +1,98 @@
+<!--
+  PLANTILLA: "Formulario de Solicitud de Cambio" (Cambio de Plan)
+
+  CÓMO USARLA
+  Crear una plantilla nueva en el diseñador con este nombre y pegar este HTML.
+  El encabezado y el zócalo con el logo de SAMAP los agrega automáticamente
+  generate-base-pdf, así que NO van acá.
+
+  IMPORTANTE — que sea FIRMABLE
+  La plantilla incluye {{firma_contratante}} y {{firma_contratada}}. Esos campos
+  son los que hacen que el documento se clasifique como firmable. Si se los saca,
+  el formulario se generaría como adjunto y nunca se enviaría a firmar.
+
+  DE DÓNDE SALEN LOS DATOS
+  El formulario se genera en el contexto de la VENTA-OPERACIÓN del cambio, que
+  sólo conoce el plan nuevo. El plan anterior, los montos anteriores, el motivo y
+  la tabla de integrantes vienen de plan_changes: los adosa attachPlanChangeContext
+  y el motor los expone en el bloque cambio y en el loop integrantes_anteriores.
+
+  LA TABLA ES UNA FOTO
+  El bloque de integrantes recorre el members_snapshot tomado al momento de la
+  solicitud, NO los adherentes actuales del contrato. Si después se editan los
+  adherentes, este formulario ya firmado sigue diciendo lo mismo.
+-->
+
+<div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#111;">
+
+  <h2 style="text-align:center;font-size:15px;margin:0 0 18px 0;">
+    FORMULARIO DE SOLICITUD DE CAMBIO
+  </h2>
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:14px;">
+    <tr>
+      <td style="padding:3px 0;"><strong>Cliente Nº:</strong> {{id_cliente}}</td>
+      <td style="padding:3px 0;"><strong>Titular Actual:</strong> {{titular_nombre}}</td>
+      <td style="padding:3px 0;text-align:right;"><strong>Vendedor:</strong> {{venta.vendedor}}</td>
+    </tr>
+  </table>
+
+  <p style="margin:0 0 12px 0;">
+    <strong>MOTIVO:</strong> {{cambio.motivo}}
+  </p>
+
+  <table style="width:100%;border-collapse:collapse;font-size:11px;">
+    <thead>
+      <tr>
+        <th style="border:1px solid #000;padding:4px;">INTEGRANTES</th>
+        <th style="border:1px solid #000;padding:4px;">PLAN ANTERIOR</th>
+        <th style="border:1px solid #000;padding:4px;">MONTO ANTERIOR</th>
+        <th style="border:1px solid #000;padding:4px;">MONTO NUEVO</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#integrantes_anteriores}}
+      <tr>
+        <td style="border:1px solid #000;padding:4px;">{{nombre}}</td>
+        <td style="border:1px solid #000;padding:4px;">{{planAnterior}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:right;">{{montoAnteriorFormateado}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:right;">{{montoNuevoFormateado}}</td>
+      </tr>
+      {{/integrantes_anteriores}}
+    </tbody>
+  </table>
+
+  <p style="margin:16px 0 0 0;text-align:justify;">
+    <strong>OBSERVACIONES:</strong> {{cambio.observaciones}}
+  </p>
+
+  <table style="width:100%;border-collapse:collapse;margin-top:14px;">
+    <tr>
+      <td style="padding:3px 0;">
+        <strong>Fecha de Inicio nvo. Cto:</strong> {{cambio.fechaInicioNuevoContrato}}
+      </td>
+      <td style="padding:3px 0;text-align:right;">
+        <strong>Nueva cuota mensual del grupo:</strong> {{cambio.montoNuevoFormateado}}
+      </td>
+    </tr>
+  </table>
+
+  <p style="margin:10px 0 0 0;">
+    Asunción, {{fecha.dia}} / {{fecha.mes}} / {{fecha.anio}}
+  </p>
+
+  <table style="width:100%;margin-top:55px;border-collapse:collapse;text-align:center;">
+    <tr>
+      <td style="width:50%;vertical-align:bottom;">
+        {{firma_contratante}}
+        <div style="border-top:1px solid #555;margin-top:36px;padding-top:4px;">CONTRATANTE</div>
+        <div style="font-size:10px;">C. I. Nº {{titular_ci}}</div>
+      </td>
+      <td style="width:50%;vertical-align:bottom;">
+        {{firma_contratada}}
+        <div style="border-top:1px solid #555;margin-top:36px;padding-top:4px;">POR LA CONTRATADA</div>
+      </td>
+    </tr>
+  </table>
+
+</div>

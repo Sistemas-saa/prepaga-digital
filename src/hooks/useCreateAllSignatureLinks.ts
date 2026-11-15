@@ -95,7 +95,10 @@ export const useCreateAllSignatureLinks = () => {
           // generar un link de tipo 'adherente' propio.
           if (beneficiary.is_primary) continue;
 
-          if (beneficiary.signature_required !== false && (beneficiary.email || beneficiary.phone)) {
+          // Contratos de EMPRESA en modo 'representante': firma solo el
+          // representante legal, no cada empleado. 'individual' = de siempre.
+          const empleadosFirman = (sale as any)?.employee_signature_mode !== 'representante';
+          if (empleadosFirman && beneficiary.signature_required !== false && (beneficiary.email || beneficiary.phone)) {
             const adhToken = generateUUID();
             const adhExpiresAt = new Date();
             adhExpiresAt.setDate(adhExpiresAt.getDate() + 1);

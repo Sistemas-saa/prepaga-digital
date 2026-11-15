@@ -6,6 +6,7 @@ export const useRoutePermissions = () => {
   const isSupervisor = role === 'supervisor';
   const isAuditor = role === 'auditor';
   const isFinanciero = role === 'financiero';
+  const canViewCommissions = ['super_admin', 'admin', 'financiero', 'supervisor', 'auditor'].includes(role);
 
   return {
     canViewDashboard: true,
@@ -19,6 +20,7 @@ export const useRoutePermissions = () => {
     canViewDocuments: !isFinanciero,
     canViewTemplates: !isFinanciero,
     canViewAnalytics: permissions.analytics.viewDashboard || isSuperAdmin || isAdmin || isSupervisor || isFinanciero,
+    canViewCommissions,
     canViewUsers: permissions.users.read || isSuperAdmin,
     canViewCompanies: isSuperAdmin,
     canViewAudit: (permissions.audit.access || isSuperAdmin || isAdmin || isSupervisor || isAuditor || role === 'vendedor' || isLoadingRole) && !isFinanciero,

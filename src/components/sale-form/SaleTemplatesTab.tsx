@@ -16,11 +16,31 @@ import { useBeneficiaries } from '@/hooks/useBeneficiaries';
 import { validateSaleTransition } from '@/lib/workflowValidator';
 import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
 import { useRolePermissions } from '@/hooks/useRolePermissions';
+import { attachGroupMonthlyTotal } from '@/hooks/useAdherentIncorporations';
+import { attachPlanChangeContext } from '@/hooks/usePlanChanges';
+import { recommendedTemplateType, SALE_TYPES } from '@/lib/saleTypes';
+import { useSaleClientType } from '@/hooks/useSaleClientType';
+import { isCompanyClient } from '@/lib/clientUtils';
+import { usePlans } from '@/hooks/usePlans';
 
 interface SaleTemplatesTabProps {
   saleId?: string;
   auditStatus?: string;
   saleStatus?: string;
+  /** Tipo de la venta: decide qué plantilla se sugiere primero en el selector. */
+  saleType?: string | null;
+  /**
+   * Empresa de la venta. El selector muestra SÓLO sus plantillas.
+   *
+   * Hace falta filtrar acá porque la RLS de `templates` no alcanza: la política
+   * "Gestors can manage templates" es ALL con USING sobre el rol solamente
+   * (super_admin/admin/gestor), sin company_id, y las políticas permisivas se
+   * suman con OR. O sea que un admin ve las plantillas de TODAS las empresas.
+   * Antes no se notaba porque todas eran de una sola empresa; al sembrar las
+   * plantillas de los tipos de venta para cada empresa, el selector pasó a
+   * mostrarlas duplicadas.
+   */
+  companyId?: string | null;
   disabled?: boolean;
 }
 
@@ -196,7 +216,7 @@ const buildSignatureLinkPayload = ({
   };
 };
 
-const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus, saleStatus, disabled }) => {
+const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus, saleStatus, saleType, companyId, disabled }) => {
   const navigate = useNavigate();
   const { templates } = useTemplates();
   const queryClient = useQueryClient();
@@ -217,6 +237,30 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
 
   const isPrivilegedRole = isAdmin || isSuperAdmin;
   const canViewPrintVersions = isAdmin || isSuperAdmin || role === 'supervisor';
+
+  // Qué plantilla sugerir depende de dos cosas que el `sale_type` no dice: si el
+  // titular es una empresa (necesita el contrato que imprime la nómina) y si
+  // esta venta-operación es una BAJA (comparte `sale_type` con el alta).
+  const { isCompany: titularEsEmpresa } = useSaleClientType(saleId);
+  // Catálogo de planes: en un contrato de empresa cada persona tiene el suyo, y
+  // el motor necesita la lista para poder imprimir {{plan_nombre}} por fila.
+  const { data: plansCatalog } = usePlans();
+  const { data: movimientoDeNomina } = useQuery({
+    queryKey: ['movimiento-nomina', saleId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('adherent_incorporations')
+        .select('*')
+        .eq('operation_sale_id', saleId!)
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return (data as Record<string, any> | null)?.movement_type ?? null;
+    },
+    enabled: !!saleId && saleType === SALE_TYPES.ALTA_ADHERENTE,
+    staleTime: 5 * 60 * 1000,
+  });
+  const esBajaDeNomina = movimientoDeNomina === 'baja';
 
   const isApproved = auditStatus === 'aprobado' || auditStatus === 'aprobado_para_templates';
   const isSaleLockedStatus = saleStatus === 'completado' || saleStatus === 'cancelado';
@@ -409,13 +453,19 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
       if (templateContentsResult.error) throw templateContentsResult.error;
       if (attachmentsResult.error) throw attachmentsResult.error;
 
+      // Se le adosa la cuota del grupo completo para el Anexo de Incorporación
+      // y los datos del Cambio de Plan para el Formulario de Solicitud de
+      // Cambio. Cada helper devuelve la venta TAL CUAL cuando no es de su tipo,
+      // así que encadenarlos es inocuo para una venta normal.
+      // OJO: esto va IGUAL en handleSendDocuments y en handleRegenerateDocuments;
+      // si se toca uno solo, el documento sale distinto al regenerar.
+      //
       // NOTA DE ORDEN (importante): el borrado de idempotencia NO se hace acá.
       // Se hace lo más tarde posible, justo antes del insert, cuando el array de
       // documentos ya está construido en memoria y TODAS las validaciones pasaron.
       // Si se borrara acá, cualquier throw posterior (render de plantillas, validación
       // de adherentes sin DDJJ, etc.) dejaría la venta SIN documentos.
-
-      const sale = saleResult.data;
+      const sale = await attachPlanChangeContext(await attachGroupMonthlyTotal(saleResult.data));
       const client = sale?.clients as any;
       const plan = sale?.plans as any;
       const company = sale?.companies as any;
@@ -510,7 +560,8 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
         .single();
 
       const context = createEnhancedTemplateContext(
-        client, plan, company, sale, effectiveBeneficiaries || [], undefined, responsesMap, companySettings
+        client, plan, company, sale, effectiveBeneficiaries || [], undefined, responsesMap, companySettings,
+        plansCatalog || []
       );
 
       const templatesWithAttachments = new Set((allAttachments || []).map((a: any) => a.template_id));
@@ -545,6 +596,13 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
           // Un template con campos de firma NUNCA es anexo, aunque su nombre no
           // diga "contrato"/"ddjj" (ej: "Plan Materno").
           const isAnexo = (isAnexoPlan || (!isDDJJ && !isContrato)) && !hasSignatureFields(template.content);
+
+          // Una EMPRESA no declara salud: la DDJJ la firma cada empleado de la
+          // nómina (ver `beneficiaryDocuments`). Emitir además una a nivel venta
+          // sacaría una declaración a nombre de la razón social, interpolada con
+          // `template_responses`, que es por VENTA y quedaría con las respuestas
+          // del último empleado que guardó.
+          if (isDDJJ && isCompanyClient(client)) return null;
 
           const pdfAttachment = isAnexo ? templatePdfAttachmentMap.get(template.id) : null;
           if (isAnexo && pdfAttachment) {
@@ -599,9 +657,14 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
           || (t as any).document_type === 'ddjj_salud';
       });
 
+      // Contratos de EMPRESA: con employee_signature_mode='representante' firma
+      // solo el representante legal y no se genera DDJJ ni enlace por empleado.
+      // 'individual' (el valor por defecto) es el comportamiento de siempre.
+      const empleadosFirman = (sale as any)?.employee_signature_mode !== 'representante';
+
       const beneficiaryDocuments = (
         await Promise.all((effectiveBeneficiaries || []).flatMap((b) => {
-          if (b.signature_required === false || b.is_primary || ddjiTemplates.length === 0) {
+          if (!empleadosFirman || b.signature_required === false || b.is_primary || ddjiTemplates.length === 0) {
             return [];
           }
 
@@ -711,7 +774,7 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
       // la base. Antes esta comprobación estaba DESPUÉS del borrado + insert, así que un
       // adherente sin DDJJ abortaba la función habiendo ya borrado los documentos previos.
       const adherentesNeedingLinks = (effectiveBeneficiaries || []).filter(
-        (b) => b.signature_required !== false && !b.is_primary
+        (b) => empleadosFirman && b.signature_required !== false && !b.is_primary
       );
       if (adherentesNeedingLinks.length > 0) {
         const idsWithDocs = new Set(
@@ -810,11 +873,19 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
         if (!check.allowed) throw new Error(check.reasons.join(', '));
       }
 
-      // Update sale status to 'enviado'
-      await supabase
+      // Update sale status to 'enviado'. El error NO se puede ignorar: si la base
+      // rechaza el cambio (p. ej. la regla de monto del titular), la venta queda en
+      // borrador con enlaces ya creados y la última firma fallaría después, lejos de
+      // acá. Mostrarlo ahora es lo único que deja al usuario corregirlo a tiempo.
+      const { error: statusError } = await supabase
         .from('sales')
         .update({ status: 'enviado' } as any)
         .eq('id', saleId);
+      if (statusError) {
+        throw new Error(
+          `Los documentos se generaron, pero la venta no pudo pasar a "Enviado": ${statusError.message}`
+        );
+      }
 
       queryClient.invalidateQueries({ queryKey: ['sale', saleId] });
       queryClient.invalidateQueries({ queryKey: ['sales-list'] });
@@ -896,7 +967,13 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
       if (templateContentsResult.error) throw templateContentsResult.error;
       if (attachmentsResult.error) throw attachmentsResult.error;
 
-      const sale = saleResult.data;
+      // Se le adosa la cuota del grupo completo para el Anexo de Incorporación
+      // y los datos del Cambio de Plan para el Formulario de Solicitud de
+      // Cambio. Cada helper devuelve la venta TAL CUAL cuando no es de su tipo,
+      // así que encadenarlos es inocuo para una venta normal.
+      // OJO: esto va IGUAL en handleSendDocuments y en handleRegenerateDocuments;
+      // si se toca uno solo, el documento sale distinto al regenerar.
+      const sale = await attachPlanChangeContext(await attachGroupMonthlyTotal(saleResult.data));
       const client = sale?.clients as any;
       const plan = sale?.plans as any;
       const company = sale?.companies as any;
@@ -962,7 +1039,7 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
         .eq('company_id', company.id)
         .single();
 
-      const context = createEnhancedTemplateContext(client, plan, company, sale, effectiveBeneficiaries, undefined, responsesMap, csSettings);
+      const context = createEnhancedTemplateContext(client, plan, company, sale, effectiveBeneficiaries, undefined, responsesMap, csSettings, plansCatalog || []);
       const templatesWithAttachments = new Set(allAttachments.map((a: any) => a.template_id));
       const templatePdfAttachmentMap = new Map<string, any>();
       const directAnnexTemplateIds = new Set<string>();
@@ -993,6 +1070,11 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
           // diga "contrato"/"ddjj" (ej: "Plan Materno").
           const isAnexo = (isAnexoPlanName(template.name) || (!isDDJJ && !isContrato))
             && !hasSignatureFields(template.content);
+
+          // Mismo criterio que en handleSendDocuments: en una venta de EMPRESA
+          // no hay DDJJ a nombre de la razón social.
+          if (isDDJJ && isCompanyClient(client)) return null;
+
           const pdfAttachment = isAnexo ? templatePdfAttachmentMap.get(template.id) : null;
 
           if (isAnexo && pdfAttachment) {
@@ -1044,9 +1126,14 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
       // DDJJ per adherente
       const ddjiTpls = templateContents.filter(isDDJJTemplate);
       const unresolvedTraceRows: Record<string, any>[] = [];
+      // Contratos de EMPRESA con employee_signature_mode='representante': firma
+      // sólo el representante legal y no se genera DDJJ por empleado. Va IGUAL
+      // que en handleSendDocuments; sin esto, regenerar resucitaba las DDJJ que
+      // el envío deliberadamente no emitió.
+      const empleadosFirman = (sale as any)?.employee_signature_mode !== 'representante';
       const beneficiaryDocuments = (
         await Promise.all((effectiveBeneficiaries || []).flatMap((b) => {
-          if (b.signature_required === false || b.is_primary || ddjiTpls.length === 0) {
+          if (!empleadosFirman || b.signature_required === false || b.is_primary || ddjiTpls.length === 0) {
             return [];
           }
 
@@ -1207,15 +1294,35 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
           La venta debe ser aprobada por auditoría antes de asociar templates para firma.
         </p>
         <Badge variant="outline" className="mt-3">
-          Estado auditoría: {auditStatus || 'pendiente'}
+          {/* No decir "pendiente" cuando el valor no llego: mentir aca desvia el diagnostico. */}
+          Estado auditoría: {auditStatus || 'sin dato'}
         </Badge>
       </div>
     );
   }
 
-  const availableTemplates = templates?.filter(
-    t => t.is_active !== false && !saleTemplates?.some(st => (st as any).templates?.id === t.id)
-  ) || [];
+  // La plantilla que corresponde al tipo de venta va PRIMERA y con badge, pero
+  // el resto sigue disponible: filtrar rompería casos legítimos (p. ej. adjuntar
+  // la DDJJ al anexo de incorporación).
+  // Una BAJA y un ALTA comparten `sale_type='alta_adherente'` a propósito (mismo
+  // anexo, misma serie ANX), así que el tipo por sí solo no distingue cuál
+  // plantilla sugerir: hace falta mirar el movimiento y si el titular es una
+  // empresa.
+  const templateTypeSugerido = recommendedTemplateType(saleType, {
+    isCompany: titularEsEmpresa,
+    isTermination: esBajaDeNomina,
+  });
+  const availableTemplates = (templates?.filter(
+    t =>
+      t.is_active !== false &&
+      // Sólo las de la empresa de esta venta (ver companyId en las props).
+      (!companyId || (t as any).company_id === companyId) &&
+      !saleTemplates?.some(st => (st as any).templates?.id === t.id)
+  ) || []).slice().sort((a, b) => {
+    if (!templateTypeSugerido) return 0;
+    const rank = (t: typeof a) => (t.template_type === templateTypeSugerido ? 0 : 1);
+    return rank(a) - rank(b);
+  });
 
   // Group generated docs
   const titularDocs = generatedDocs?.filter(d => !d.beneficiary_id) || [];
@@ -1261,7 +1368,16 @@ const SaleTemplatesTab: React.FC<SaleTemplatesTabProps> = ({ saleId, auditStatus
             </SelectTrigger>
             <SelectContent>
               {availableTemplates.map(t => (
-                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                <SelectItem key={t.id} value={t.id}>
+                  <span className="flex items-center gap-2">
+                    {t.name}
+                    {!!templateTypeSugerido && t.template_type === templateTypeSugerido && (
+                      <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-50 text-[10px]">
+                        Recomendada
+                      </Badge>
+                    )}
+                  </span>
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>

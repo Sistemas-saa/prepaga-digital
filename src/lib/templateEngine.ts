@@ -1,5 +1,6 @@
 
 import { formatCurrency } from "@/lib/utils";
+import { getClientDisplayName, getClientDocument, getClientDocumentLabel, isCompanyClient } from "@/lib/clientUtils";
 
 // Template Engine for dynamic document generation
 export interface TemplateVariable {
@@ -14,6 +15,11 @@ export interface TemplateContext {
     email: string;
     telefono?: string;
     dni?: string;
+    documento?: string;
+    documentoLabel?: string;
+    ruc?: string;
+    razonSocial?: string;
+    esEmpresa?: boolean;
     direccion?: string;
     fecha_nacimiento?: string;
     gender?: string;
@@ -54,11 +60,16 @@ export const createTemplateContext = (
 ): TemplateContext => {
   return {
     cliente: {
-      nombre: client?.first_name || '',
-      apellido: client?.last_name || '',
+      nombre: isCompanyClient(client) ? getClientDisplayName(client) : client?.first_name || '',
+      apellido: isCompanyClient(client) ? '' : client?.last_name || '',
       email: client?.email || '',
       telefono: client?.phone || '',
-      dni: client?.dni || '',
+      dni: getClientDocument(client),
+      documento: getClientDocument(client),
+      documentoLabel: getClientDocumentLabel(client),
+      ruc: isCompanyClient(client) ? client?.ruc || '' : '',
+      razonSocial: isCompanyClient(client) ? client?.razon_social || '' : '',
+      esEmpresa: isCompanyClient(client),
       direccion: client?.address || '',
       fecha_nacimiento: client?.birth_date || '',
       gender: (client as any)?.gender || '',
@@ -131,6 +142,10 @@ export const getAvailableVariables = (): string[] => {
     '{{cliente.email}}',
     '{{cliente.telefono}}',
     '{{cliente.dni}}',
+    '{{cliente.documento}}',
+    '{{cliente.documentoLabel}}',
+    '{{cliente.ruc}}',
+    '{{cliente.razonSocial}}',
     '{{cliente.direccion}}',
     '{{cliente.fecha_nacimiento}}',
     '{{plan.nombre}}',

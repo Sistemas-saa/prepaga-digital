@@ -1,0 +1,111 @@
+<!--
+  PLANTILLA: "Anexo de Incorporación de Adherente"
+
+  CÓMO USARLA
+  Crear una plantilla nueva en el diseñador con este nombre y pegar este HTML.
+  El encabezado y el zócalo con el logo de SAMAP los agrega automáticamente
+  generate-base-pdf, así que NO van acá.
+
+  IMPORTANTE — que sea FIRMABLE
+  La plantilla incluye {{firma_contratante}} y {{firma_contratada}}. Esos campos
+  son los que hacen que el documento se clasifique como firmable. Si se los saca,
+  el anexo se generaría como adjunto y nunca se enviaría a firmar.
+
+  LA TABLA SE REPITE SOLA
+  El bloque {{#beneficiarios}} ... {{/beneficiarios}} se repite una vez por cada
+  persona que se incorpora. No hay que dejar 6 filas vacías como en el papel:
+  salen exactamente las que se cargaron.
+-->
+
+<div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#111;">
+
+  <h2 style="text-align:center;font-size:15px;margin:0 0 18px 0;">
+    ANEXO DE INCORPORACIÓN DE ADHERENTE
+  </h2>
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:14px;">
+    <tr>
+      <td style="padding:3px 0;"><strong>ID CLIENTE Nº:</strong> {{id_cliente}}</td>
+      <td style="padding:3px 0;"><strong>Titular:</strong> {{titular_nombre}}</td>
+      <td style="padding:3px 0;text-align:right;"><strong>Plan:</strong> {{plan.nombre}}</td>
+    </tr>
+  </table>
+
+  <p style="margin:0 0 12px 0;text-align:justify;">
+    El CONTRATANTE incorpora a partir de la fecha como adherente/s a la/s siguiente/s
+    persona/s con los mismos beneficios y obligaciones correspondientes:
+  </p>
+
+  <table style="width:100%;border-collapse:collapse;font-size:10px;">
+    <thead>
+      <tr>
+        <th style="border:1px solid #000;padding:4px;">Nombre y Apellido</th>
+        <th style="border:1px solid #000;padding:4px;">C. I. Nº</th>
+        <th style="border:1px solid #000;padding:4px;">Fecha Nac.</th>
+        <th style="border:1px solid #000;padding:4px;">Edad</th>
+        <th style="border:1px solid #000;padding:4px;">Parentesco</th>
+        <th style="border:1px solid #000;padding:4px;">Fecha de Ingreso</th>
+        <th style="border:1px solid #000;padding:4px;">Precio</th>
+        <th style="border:1px solid #000;padding:4px;">V.I</th>
+        <th style="border:1px solid #000;padding:4px;">Teléfono</th>
+        <th style="border:1px solid #000;padding:4px;">Domicilio - Barrio</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#beneficiarios}}
+      <tr>
+        <td style="border:1px solid #000;padding:4px;">{{nombreCompleto}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{dni}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{fechaNacimiento}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{edad}}</td>
+        <td style="border:1px solid #000;padding:4px;">{{parentesco}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{fecha_ingreso}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:right;">{{montoFormateado}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{vigencia_inmediata_adherente}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{telefono}}</td>
+        <td style="border:1px solid #000;padding:4px;">{{domicilio}} - {{barrio}}</td>
+      </tr>
+      {{/beneficiarios}}
+    </tbody>
+  </table>
+
+  <p style="margin:16px 0 0 0;text-align:justify;">
+    Este anexo está firmado en dos copias, una para el CONTRATANTE y otra para la
+    CONTRATADA. La cuota mensual, desde el momento de la firma de este anexo, por
+    todo el grupo de personas que conforman el contrato, es de Guaraníes:
+    <strong>{{monto_total_grupo}}</strong>
+  </p>
+
+  <!--
+    OJO: el motor interpola TAMBIÉN dentro de los comentarios HTML, así que acá
+    los nombres van sin llaves a propósito.
+    monto_total_grupo = cuota del CONTRATO COMPLETO ya con las personas que se
+    incorporan. monto_total, en cambio, es solo el importe de esta incorporación
+    (y es la base sobre la que se calcula la comisión).
+  -->
+
+  <p style="margin:10px 0 0 0;">
+    Asunción, {{fecha.dia}} / {{fecha.mes}} / {{fecha.anio}}
+  </p>
+
+  <table style="width:100%;margin-top:55px;border-collapse:collapse;text-align:center;">
+    <tr>
+      <td style="width:33%;vertical-align:bottom;">
+        {{firma_contratante}}
+        <div style="border-top:1px solid #555;margin-top:36px;padding-top:4px;">CONTRATANTE</div>
+        <div style="font-size:10px;">C. I. Nº {{titular_ci}}</div>
+      </td>
+      <td style="width:33%;vertical-align:bottom;">
+        <!-- El ejecutivo de ventas no firma digitalmente: la línea queda para
+             firma de puño y letra sobre el impreso. -->
+        <div style="border-top:1px solid #555;margin-top:36px;padding-top:4px;">EJECUTIVO DE VENTAS</div>
+        <div style="font-size:10px;">{{vendedor_nombre}}</div>
+      </td>
+      <td style="width:33%;vertical-align:bottom;">
+        {{firma_contratada}}
+        <div style="border-top:1px solid #555;margin-top:36px;padding-top:4px;">POR LA CONTRATADA</div>
+      </td>
+    </tr>
+  </table>
+
+</div>

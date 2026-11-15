@@ -3,48 +3,47 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Database } from '@/integrations/supabase/types';
+import { canMutateBeneficiaries } from '@/lib/saleUtils';
 
 type Beneficiary = Database['public']['Tables']['beneficiaries']['Row'];
 type BeneficiaryInsert = Database['public']['Tables']['beneficiaries']['Insert'];
 type BeneficiaryUpdate = Database['public']['Tables']['beneficiaries']['Update'];
 
-// Recalculates sales.total_amount = titular_amount (base plan price) + sum(adherentes amounts)
-async function recalculateSaleTotalAmount(saleId: string) {
-  // Fetch sale's titular_amount (base price for the primary/plan)
+/**
+ * `sales.total_amount` lo calcula EXCLUSIVAMENTE la base.
+ *
+ * El trigger `trg_recalculate_sale_total` sobre `beneficiaries` llama a
+ * `recalculate_sale_total_amount(sale_id)`, que es la única fuente de verdad
+ * (ver migración 20260818000001_fix_total_amount_single_source.sql).
+ *
+ * Antes este archivo recalculaba el total por su cuenta con una tercera fórmula.
+ * Convivía con la del trigger, que ignoraba `titular_amount`, y el resultado
+ * final dependía del orden entre ambas escrituras: en test había ventas a las
+ * que les faltaba exactamente el monto del titular. No reintroducir el cálculo
+ * acá — el trigger corre dentro de la misma sentencia, así que cuando la
+ * mutación vuelve el total ya está actualizado y sólo hace falta invalidar.
+ */
+/**
+ * Rechaza la mutación si el contrato ya está firmado.
+ *
+ * Se hace acá, en el hook, y no sólo en la UI: hasta ahora el bloqueo era una
+ * prop `disabled` que apenas ocultaba botones, así que cualquier camino que no
+ * pasara por ese componente escribía igual. La base tiene además su propio
+ * trigger de respaldo; esta capa existe para dar un mensaje claro en vez de un
+ * error de Postgres.
+ */
+async function assertBeneficiariesMutables(saleId: string) {
   const { data: sale } = await supabase
     .from('sales')
-    .select('titular_amount')
+    .select('status')
     .eq('id', saleId)
-    .single();
+    .maybeSingle();
 
-  // Fetch all beneficiaries
-  const { data: beneficiaries } = await supabase
-    .from('beneficiaries')
-    .select('amount, is_primary')
-    .eq('sale_id', saleId);
-
-  const hasPrimary = (beneficiaries || []).some((b: any) => b.is_primary);
-
-  if (hasPrimary) {
-    // If a primary beneficiary exists, use ALL beneficiary amounts (primary + adherentes)
-    const totalAmount = (beneficiaries || []).reduce((sum: number, b: any) => sum + (b.amount || 0), 0);
-    // Sync titular_amount with primary beneficiary's amount — but only if > 0.
-    // If primary has amount=0 (común al crearlo y olvidar el monto), NO pisar titular_amount
-    // (preserva el valor existente cargado en SaleBasicTab o desde el plan).
-    const primaryAmount = Number((beneficiaries || []).find((b: any) => b.is_primary)?.amount || 0);
-    const updatePayload: { titular_amount?: number; total_amount: number } = {
-      total_amount: totalAmount,
-    };
-    if (primaryAmount > 0) {
-      updatePayload.titular_amount = primaryAmount;
-    }
-    await supabase.from('sales').update(updatePayload).eq('id', saleId);
-  } else {
-    // No primary: use titular_amount as base + sum of adherentes
-    const titularBase = Number((sale as any)?.titular_amount || 0);
-    const adherentesSum = (beneficiaries || []).reduce((sum: number, b: any) => sum + (b.amount || 0), 0);
-    const totalAmount = titularBase + adherentesSum;
-    await supabase.from('sales').update({ total_amount: totalAmount }).eq('id', saleId);
+  if (!canMutateBeneficiaries(sale)) {
+    throw new Error(
+      'El contrato ya está firmado: los adherentes no se pueden modificar. ' +
+        'Para sumar a alguien usá una Incorporación de Adherente.',
+    );
   }
 }
 
@@ -81,6 +80,8 @@ export const useCreateBeneficiary = () => {
 
   return useMutation({
     mutationFn: async (beneficiary: BeneficiaryInsert) => {
+      await assertBeneficiariesMutables(beneficiary.sale_id);
+
       const { data, error } = await supabase
         .from('beneficiaries')
         .insert(beneficiary)
@@ -91,9 +92,7 @@ export const useCreateBeneficiary = () => {
       return data;
     },
     onSuccess: (data) => {
-      recalculateSaleTotalAmount(data.sale_id).then(() => {
-        invalidateBeneficiaryRelatedQueries(queryClient, data.sale_id);
-      });
+      invalidateBeneficiaryRelatedQueries(queryClient, data.sale_id);
       toast({
         title: "Beneficiario creado",
         description: "El beneficiario ha sido agregado exitosamente.",
@@ -115,6 +114,13 @@ export const useUpdateBeneficiary = () => {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: BeneficiaryUpdate & { id: string }) => {
+      const { data: actual } = await supabase
+        .from('beneficiaries')
+        .select('sale_id')
+        .eq('id', id)
+        .maybeSingle();
+      if (actual?.sale_id) await assertBeneficiariesMutables(actual.sale_id);
+
       const { data, error } = await supabase
         .from('beneficiaries')
         .update(updates)
@@ -126,9 +132,7 @@ export const useUpdateBeneficiary = () => {
       return data;
     },
     onSuccess: (data) => {
-      recalculateSaleTotalAmount(data.sale_id).then(() => {
-        invalidateBeneficiaryRelatedQueries(queryClient, data.sale_id);
-      });
+      invalidateBeneficiaryRelatedQueries(queryClient, data.sale_id);
       toast({
         title: "Beneficiario actualizado",
         description: "Los cambios han sido guardados exitosamente.",
@@ -154,7 +158,9 @@ export const useDeleteBeneficiary = () => {
         .from('beneficiaries')
         .select('sale_id')
         .eq('id', id)
-        .single();
+        .maybeSingle();
+
+      if (beneficiary?.sale_id) await assertBeneficiariesMutables(beneficiary.sale_id);
 
       const { error } = await supabase
         .from('beneficiaries')
@@ -166,9 +172,7 @@ export const useDeleteBeneficiary = () => {
     },
     onSuccess: (saleId) => {
       if (saleId) {
-        recalculateSaleTotalAmount(saleId).then(() => {
-          invalidateBeneficiaryRelatedQueries(queryClient, saleId);
-        });
+        invalidateBeneficiaryRelatedQueries(queryClient, saleId);
       }
       toast({
         title: "Beneficiario eliminado",

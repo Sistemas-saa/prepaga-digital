@@ -10,6 +10,7 @@ import { ClientForm } from "@/components/ClientForm";
 import { useClients, useDeleteClient } from "@/hooks/useClients";
 import { Database } from "@/integrations/supabase/types";
 import { useSimpleAuthContext } from "@/components/SimpleAuthProvider";
+import { getClientDisplayName, getClientDocument } from "@/lib/clientUtils";
 import { formatDateOnly } from "@/lib/dateOnly";
 import {
   AlertDialog,
@@ -53,10 +54,12 @@ export function ClientsList() {
     const normalizedSearch = searchTerm.trim().toLowerCase();
 
     return clients.filter((client) => {
-      const fullName = `${client.first_name || ''} ${client.last_name || ''}`.trim().toLowerCase();
+      // Nombre y documento segun el tipo: una empresa se busca por razon social
+      // y por RUC, una persona por nombre y por C.I.
+      const fullName = getClientDisplayName(client).toLowerCase();
       const email = (client.email || '').toLowerCase();
       const phone = (client.phone || '').toLowerCase();
-      const dni = (client.dni || '').toLowerCase();
+      const dni = getClientDocument(client).toLowerCase();
 
       const matchesSearch =
         normalizedSearch.length === 0 ||
@@ -122,7 +125,7 @@ export function ClientsList() {
               <Input
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por nombre, email, teléfono o DNI/CI"
+                placeholder="Buscar por nombre, razón social, RUC/C.I., email o teléfono"
                 className="pl-9"
               />
             </div>
@@ -159,7 +162,7 @@ export function ClientsList() {
                 <TableHead>Nombre</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Teléfono</TableHead>
-                <TableHead>DNI/CI</TableHead>
+                <TableHead>RUC/C.I.</TableHead>
                 <TableHead>Fecha Nac.</TableHead>
                 <TableHead>Acciones</TableHead>
               </TableRow>
@@ -168,7 +171,7 @@ export function ClientsList() {
               {filteredClients.map((client) =>
               <TableRow key={client.id}>
                   <TableCell className="font-medium">
-                    {client.first_name} {client.last_name}
+                    {getClientDisplayName(client)}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center space-x-2">
@@ -186,7 +189,7 @@ export function ClientsList() {
                   '-'
                   }
                   </TableCell>
-                  <TableCell>{client.dni || '-'}</TableCell>
+                  <TableCell>{getClientDocument(client) || '-'}</TableCell>
                   <TableCell>{formatDateOnly(client.birth_date, 'es-PY')}</TableCell>
                   <TableCell>
                     <div className="flex space-x-2">
@@ -207,7 +210,7 @@ export function ClientsList() {
                           <AlertDialogHeader>
                             <AlertDialogTitle>¿Eliminar cliente?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              Esta acción no se puede deshacer. Se eliminará permanentemente el cliente "{client.first_name} {client.last_name}".
+                              Esta acción no se puede deshacer. Se eliminará permanentemente el cliente "{getClientDisplayName(client)}".
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>

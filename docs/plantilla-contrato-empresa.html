@@ -1,0 +1,173 @@
+<!--
+  PLANTILLA: "Contrato Colectivo de Empresa"
+
+  CUÁNDO SE USA
+  En una venta cuyo titular es una EMPRESA (clients.client_type = 'empresa').
+  A diferencia del contrato individual, acá no hay un titular-persona: los
+  beneficiarios son los EMPLEADOS, cada uno con su plan y su cuota, y de cada
+  uno cuelgan sus adherentes.
+
+  CÓMO USARLA
+  Crear una plantilla nueva en el diseñador con este nombre y pegar este HTML.
+  El encabezado y el zócalo con el logo de SAMAP los agrega automáticamente
+  generate-base-pdf, así que NO van acá.
+
+  IMPORTANTE — que sea FIRMABLE
+  Incluye firma_contratante y firma_contratada (entre llaves, más abajo). Esos
+  campos son los que hacen que el documento se clasifique como firmable. Si se
+  los saca, el contrato se generaría como adjunto y nunca se enviaría a firmar.
+
+  LAS DOS TABLAS
+  1. RESUMEN POR EMPLEADO — usa el loop de empleados, con el sub-loop de
+     sus_adherentes anidado adentro. Una fila por empleado, con su plan, su
+     cantidad de adherentes y el subtotal del grupo.
+  2. DETALLE — usa el loop plano de beneficiarios, que ya viene ordenado como
+     nómina (cada empleado seguido de su grupo) y trae las columnas rol,
+     plan_nombre y depende_de.
+
+  Se pueden borrar las que no se quieran: son independientes.
+
+  OJO: el motor interpola TAMBIÉN dentro de los comentarios HTML, así que en
+  este bloque los nombres van sin llaves a propósito.
+-->
+
+<div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#111;">
+
+  <h2 style="text-align:center;font-size:15px;margin:0 0 18px 0;">
+    CONTRATO COLECTIVO DE ASISTENCIA MÉDICA
+  </h2>
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:6px;">
+    <tr>
+      <td style="padding:3px 0;width:60%;"><strong>Razón Social:</strong> {{cliente.razonSocial}}</td>
+      <td style="padding:3px 0;text-align:right;"><strong>R.U.C.:</strong> {{cliente.ruc}}</td>
+    </tr>
+    <tr>
+      <td style="padding:3px 0;"><strong>Domicilio:</strong> {{cliente.direccion}} - {{cliente.ciudad}}</td>
+      <td style="padding:3px 0;text-align:right;"><strong>Contrato Nº:</strong> {{venta.numeroContrato}}</td>
+    </tr>
+    <tr>
+      <td style="padding:3px 0;"><strong>Contacto:</strong> {{cliente.telefono}} · {{cliente.email}}</td>
+      <td style="padding:3px 0;text-align:right;"><strong>Inicio de vigencia:</strong> {{venta.fechaInicioContrato}}</td>
+    </tr>
+  </table>
+
+  <p style="margin:0 0 12px 0;text-align:justify;">
+    La CONTRATANTE incorpora a la cobertura de asistencia médica a los funcionarios
+    detallados a continuación, y a los adherentes a cargo de cada uno de ellos, con
+    los beneficios y obligaciones que corresponden al plan contratado por cada
+    persona.
+  </p>
+
+  <h3 style="font-size:12px;margin:14px 0 6px 0;">RESUMEN POR FUNCIONARIO</h3>
+
+  <table style="width:100%;border-collapse:collapse;font-size:10px;">
+    <thead>
+      <tr>
+        <th style="border:1px solid #000;padding:4px;">Nº</th>
+        <th style="border:1px solid #000;padding:4px;">Funcionario</th>
+        <th style="border:1px solid #000;padding:4px;">C. I. Nº</th>
+        <th style="border:1px solid #000;padding:4px;">Cargo</th>
+        <th style="border:1px solid #000;padding:4px;">Plan</th>
+        <th style="border:1px solid #000;padding:4px;">Adh.</th>
+        <th style="border:1px solid #000;padding:4px;">Cuota del grupo</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#empleados}}
+      <tr>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{indice}}</td>
+        <td style="border:1px solid #000;padding:4px;">{{nombreCompleto}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{dni}}</td>
+        <td style="border:1px solid #000;padding:4px;">{{parentesco}}</td>
+        <td style="border:1px solid #000;padding:4px;">{{plan_nombre}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{cantidadAdherentes}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:right;">{{subtotalFormateado}}</td>
+      </tr>
+      {{#sus_adherentes}}
+      <tr>
+        <td style="border:1px solid #000;padding:4px;"></td>
+        <td style="border:1px solid #000;padding:4px;padding-left:16px;">↳ {{nombreCompleto}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{dni}}</td>
+        <td style="border:1px solid #000;padding:4px;">{{parentesco}}</td>
+        <td style="border:1px solid #000;padding:4px;">{{plan_nombre}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">-</td>
+        <td style="border:1px solid #000;padding:4px;text-align:right;">{{montoFormateado}}</td>
+      </tr>
+      {{/sus_adherentes}}
+      {{/empleados}}
+    </tbody>
+  </table>
+
+  <h3 style="font-size:12px;margin:18px 0 6px 0;">DETALLE DE PERSONAS CUBIERTAS</h3>
+
+  <table style="width:100%;border-collapse:collapse;font-size:10px;">
+    <thead>
+      <tr>
+        <th style="border:1px solid #000;padding:4px;">Nombre y Apellido</th>
+        <th style="border:1px solid #000;padding:4px;">C. I. Nº</th>
+        <th style="border:1px solid #000;padding:4px;">Fecha Nac.</th>
+        <th style="border:1px solid #000;padding:4px;">Edad</th>
+        <th style="border:1px solid #000;padding:4px;">Condición</th>
+        <th style="border:1px solid #000;padding:4px;">Depende de</th>
+        <th style="border:1px solid #000;padding:4px;">Plan</th>
+        <th style="border:1px solid #000;padding:4px;">Fecha de Ingreso</th>
+        <th style="border:1px solid #000;padding:4px;">Cuota</th>
+        <th style="border:1px solid #000;padding:4px;">V.I</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#beneficiarios}}
+      <tr>
+        <td style="border:1px solid #000;padding:4px;">{{nombreCompleto}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{dni}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{fechaNacimiento}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{edad}}</td>
+        <td style="border:1px solid #000;padding:4px;">{{rol}}</td>
+        <td style="border:1px solid #000;padding:4px;">{{depende_de}}</td>
+        <td style="border:1px solid #000;padding:4px;">{{plan_nombre}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{fecha_ingreso}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:right;">{{montoFormateado}}</td>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{vigencia_inmediata_adherente}}</td>
+      </tr>
+      {{/beneficiarios}}
+    </tbody>
+  </table>
+
+  <p style="margin:16px 0 0 0;text-align:justify;">
+    Este contrato está firmado en dos copias, una para la CONTRATANTE y otra para la
+    CONTRATADA. La cuota mensual por la totalidad de las personas cubiertas es de
+    Guaraníes: <strong>{{monto_total}}</strong> ({{monto_total_letras}}).
+  </p>
+
+  <p style="margin:8px 0 0 0;text-align:justify;">
+    Las incorporaciones y desvinculaciones posteriores de funcionarios se
+    instrumentan mediante el anexo correspondiente, firmado por ambas partes, y
+    surten efecto desde la fecha allí indicada.
+  </p>
+
+  <p style="margin:10px 0 0 0;">
+    Asunción, {{fecha.dia}} / {{fecha.mes}} / {{fecha.anio}}
+  </p>
+
+  <table style="width:100%;margin-top:55px;border-collapse:collapse;text-align:center;">
+    <tr>
+      <td style="width:33%;vertical-align:bottom;">
+        {{firma_contratante}}
+        <div style="border-top:1px solid #555;margin-top:36px;padding-top:4px;">POR LA CONTRATANTE</div>
+        <div style="font-size:10px;">{{cliente.razonSocial}} - R.U.C. {{cliente.ruc}}</div>
+      </td>
+      <td style="width:33%;vertical-align:bottom;">
+        <!-- El ejecutivo de ventas no firma digitalmente: la línea queda para
+             firma de puño y letra sobre el impreso. -->
+        <div style="border-top:1px solid #555;margin-top:36px;padding-top:4px;">EJECUTIVO DE VENTAS</div>
+        <div style="font-size:10px;">{{vendedor_nombre}}</div>
+      </td>
+      <td style="width:33%;vertical-align:bottom;">
+        {{firma_contratada}}
+        <div style="border-top:1px solid #555;margin-top:36px;padding-top:4px;">POR LA CONTRATADA</div>
+      </td>
+    </tr>
+  </table>
+
+</div>

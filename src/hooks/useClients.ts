@@ -77,7 +77,7 @@ export const useClientsLookup = (enabled = true) => {
     queryFn: async () => {
       let query = supabase
         .from('clients')
-        .select('id, first_name, last_name, email, created_at')
+        .select('id, first_name, last_name, email, created_at, client_type, razon_social, ruc, dni')
         .order('created_at', { ascending: false });
 
       if (!isSuperRole) {

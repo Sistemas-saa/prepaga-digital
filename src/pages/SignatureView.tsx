@@ -17,6 +17,7 @@ import {
 import DOMPurify from 'dompurify';
 import { formatCurrency } from "@/lib/utils";
 import { useSignatureVerification, generateDocumentHash, buildEvidenceBundle } from "@/hooks/useSignatureVerification";
+import { getClientDocument, getClientDocumentLabel, isCompanyClient } from "@/lib/clientUtils";
 
 const SignatureView = () => {
   const { token } = useParams<{ token: string }>();
@@ -625,7 +626,13 @@ const SignatureView = () => {
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <p className="font-medium">{client.first_name} {client.last_name}</p>
-                {client.dni && <p className="text-muted-foreground">C.I.: {client.dni}</p>}
+                {(() => {
+                  // El enlace de titular puede pertenecer a una empresa. Los
+                  // enlaces de adherente/contratada deben seguir mostrando C.I.
+                  const document = isTitular ? getClientDocument(client) : client.dni;
+                  const label = isTitular ? getClientDocumentLabel(client) : 'C.I.';
+                  return document ? <p className="text-muted-foreground">{label}: {document}</p> : null;
+                })()}
                 {isTitular && client.email && <p className="text-muted-foreground">{client.email}</p>}
               </CardContent>
             </Card>
@@ -656,7 +663,12 @@ const SignatureView = () => {
           const isAnnex = (d: any) => {
             // Never treat a signed final contract as an annex
             if (d.document_type === 'contrato' && (d.signed_pdf_url || d.is_final)) return false;
-            return d.requires_signature === false || d.document_type === 'anexo' || d.document_type?.includes('anexo');
+            // Comparación EXACTA, nunca includes(): 'anexo' es el adjunto no
+            // firmable heredado. Con includes(), cualquier tipo futuro que
+            // contenga la palabra (ej. 'anexo_incorporacion') quedaría marcado
+            // como no firmable y NUNCA se firmaría — es el mismo síntoma que
+            // tuvo el Plan Materno. Verificado: el código solo escribe 'anexo'.
+            return d.requires_signature === false || d.document_type === 'anexo';
           };
           const annexDocs = documents?.filter((d: any) => isAnnex(d)) || [];
           const docsToSign = documents?.filter((d: any) => !isAnnex(d)) || [];

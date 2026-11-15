@@ -1,6 +1,7 @@
 
 import { formatCurrency } from '@/lib/utils';
 import DOMPurify from 'dompurify';
+import { getClientDisplayName, getClientDocument, getClientDocumentLabel } from '@/lib/clientUtils';
 
 // PDF Generation utilities
 export interface PDFDocument {
@@ -16,6 +17,9 @@ export interface PDFDocument {
     email: string;
     phone?: string;
     dni?: string;
+    client_type?: string | null;
+    razon_social?: string | null;
+    ruc?: string | null;
   };
   plan: {
     name: string;
@@ -77,10 +81,10 @@ export const generatePDFContent = (document: PDFDocument): string => {
     <div class="client-info">
         <h2>Información del Cliente</h2>
         <table>
-            <tr><td><strong>Nombre Completo</strong></td><td>${client.first_name} ${client.last_name}</td></tr>
+            <tr><td><strong>Nombre Completo</strong></td><td>${getClientDisplayName(client)}</td></tr>
             <tr><td><strong>Email</strong></td><td>${client.email}</td></tr>
             ${client.phone ? `<tr><td><strong>Teléfono</strong></td><td>${client.phone}</td></tr>` : ''}
-            ${client.dni ? `<tr><td><strong>DNI</strong></td><td>${client.dni}</td></tr>` : ''}
+            ${getClientDocument(client) ? `<tr><td><strong>${getClientDocumentLabel(client)}</strong></td><td>${getClientDocument(client)}</td></tr>` : ''}
         </table>
     </div>
 

@@ -22,19 +22,36 @@
 
 ## ⚠️ REGLA CRÍTICA — NUNCA VIOLAR
 
-### `generate-base-pdf` está administrada externamente
+### `generate-base-pdf` la pisa Lovable — el repo es la copia de rescate
 
 ```
-❌ NO tocar supabase/functions/generate-base-pdf/index.ts
-❌ NO redesplegar generate-base-pdf en ningún deploy de Lovable
-❌ NO incluirla en push o CI/CD automático
+❌ NO dejar que un deploy de Lovable quede desplegado sobre generate-base-pdf
+✅ SÍ: supabase/functions/generate-base-pdf/index.ts ES la v82 y se puede redesplegar
 ```
 
-Esta función tiene una implementación específica de producción que usa **tabla HTML con `<thead>/<tfoot>`** para el branding (encabezado y zócalo). Lovable usa `displayHeaderFooter: true` de Puppeteer que **no soporta imágenes base64** en el renderer actual.
+Esta función usa **tabla HTML con `<thead>/<tfoot>`** para el branding (encabezado y
+zócalo), con `displayHeaderFooter: false` y `margin: 0`. Lovable la reescribe usando
+`displayHeaderFooter: true` de Puppeteer con `headerTemplate`/`footerTemplate`, que **no
+soporta imágenes base64** en el renderer actual: sólo renderiza texto, así que el header y
+el footer salen **vacíos**.
 
-Si el branding deja de aparecer en los PDFs, es porque Lovable sobreescribió esta función. Contactar al administrador del sistema para restaurarla.
+Si el branding deja de aparecer en los PDFs, es porque Lovable sobreescribió la función
+desplegada. Redesplegar (ver *Comandos Útiles*).
 
 **Versión correcta de producción: v82+** (estrategia `thead/tfoot`, `displayHeaderFooter: false`, `margin: 0`)
+
+> **Cambio 2026-09-07**: hasta esta fecha el archivo del repo era la versión **rota** de
+> Lovable y la v82 sólo existía como función desplegada en prod. Eso rompió TEST: el deploy
+> masivo del `2026-04-05` publicó el archivo del repo en `ykducvvcjzdpoojxlsig` (v62) y
+> **ningún** PDF de test tuvo branding hasta que se restauró (v63). Por eso ahora la v82
+> está commiteada: el repo y prod coinciden, y desplegar desde el repo es el camino seguro.
+> Si volvés a modificar este archivo, que sea con intención — no como efecto colateral de
+> un deploy de Lovable.
+
+> ⚠️ **Eso es cierto en `codex/incorporacion-entrega-a`, no en `main`** (relevado el
+> 2026-11-02): la v82 entró en `af7ba59`, que sólo está en esa rama, y en `main` sigue la
+> versión de Lovable (`headerTemplate`). Hasta que se mergee, **no desplegar
+> `generate-base-pdf` desde `main`**.
 
 ---
 
@@ -133,6 +150,332 @@ Hay triggers automáticos en `signature_links`, `beneficiaries` y `clients` que 
 ```
 
 **Importante**: El CONTRATO solo se genera cuando firma la CONTRATADA — necesita incluir el bloque de firma de la contratada en el HTML antes de sellar el PDF.
+
+---
+
+## Tipos de Venta y Anexos (`sales.sale_type`)
+
+`sale_type` es **texto libre** (sin enum ni CHECK). El catálogo canónico vive en
+`src/lib/saleTypes.ts` y hay dos familias:
+
+| Familia | Valores | Quién los pone |
+|---|---|---|
+| **Manuales** | `venta_nueva`, `reingreso` | El vendedor, en el selector de Tipo de Venta |
+| **De operación** | `alta_adherente`, `cambio_plan` | El SISTEMA, al crear una venta-operación sobre un contrato ya firmado |
+
+Una **venta-operación** no es una venta comercial: es el vehículo para poder
+firmar un anexo sobre un contrato existente y liquidar su comisión aparte.
+Nunca deben aparecer en el selector ni inflar métricas — de eso se encarga
+`excludeOperationSales` en `src/lib/saleFilters.ts`. Sí entran en comisiones.
+
+### Los 3 formularios
+
+Los originales en papel están en `Tipo_ventas/`. Cada uno tiene su plantilla HTML
+en `docs/`, sembrada en `templates` por `20260822000002_seed_plantillas_tipos_venta.sql`:
+
+| Formulario | `sale_type` | `template_type` | Plantilla |
+|---|---|---|---|
+| Anexo de Incorporación de Adherente | `alta_adherente` | `anexo_incorporacion` | `docs/plantilla-anexo-incorporacion.html` |
+| Solicitud de Cambio de Plan | `cambio_plan` | `solicitud_cambio_plan` | `docs/plantilla-solicitud-cambio-plan.html` |
+| Anexo Especial de Vigencia Inmediata | *(ninguno)* | `anexo_vigencia_inmediata` | `docs/plantilla-anexo-vigencia-inmediata.html` |
+
+Vigencia Inmediata **no tiene tipo ni tabla propia**: se adjunta a cualquier venta
+y lista los beneficiarios con `immediate_coverage`, vía el loop
+`{{#beneficiarios_vi}}` de `src/lib/enhancedTemplateEngine.ts`.
+
+Las tres llevan `{{firma_contratante}}`, así que `SaleTemplatesTab` las clasifica
+como **`document_type = 'contrato'`**, NO `'anexo'`. **Es a propósito y no hay que
+"corregirlo"**: `finalize-signature-link` saltea los documentos `'anexo'` y nunca
+les generaría el PDF firmado — pasarlas a `'anexo'` haría que dejen de firmarse.
+Que se muestren como "Anexo" es sólo una etiqueta de `normalizeDocumentType` en
+`src/pages/Documents.tsx`.
+
+### Cadena de activación (es automática, no hay click manual)
+
+```
+firma del último signature_link  →  status='completado'
+   → trigger auto_advance_sale_status (ON signature_links)
+   → sales.status='completado' de la venta-operación
+      → trg_activate_adherent_incorporation  → suma los adherentes al contrato madre
+      → trg_activate_plan_change             → aplica plan/fecha/montos al contrato madre
+         → recalculate_sale_total_amount(parent_sale_id)
+```
+
+Está en la base y no en el front a propósito: el navegador puede no estar abierto
+cuando se completa la última firma.
+
+Las ventas-operación se crean con `audit_status = 'aprobado_para_templates'`: el
+contrato madre ya pasó auditoría, y sin eso `SaleTemplatesTab` bloquearía adjuntar
+la plantilla y el anexo no se podría emitir nunca.
+
+### Estado por entorno
+
+| | US test (`ykducvvcjzdpoojxlsig`) | BR prod (`ejiycfqxgtrzaysgpzmx`) |
+|---|---|---|
+| `adherent_incorporations`, `plan_changes` | ✅ | ❌ **no existen** |
+| `beneficiaries.entry_date` / `.immediate_coverage` | ✅ | ❌ |
+| `clients.external_id`, `sales.employee_signature_mode` | ✅ | ❌ |
+| Plantillas de los 3 formularios | ✅ | ❌ |
+| Nómina de empresa (`beneficiaries.member_role` / `.parent_beneficiary_id` / `.plan_id`) | ✅ | ❌ |
+| Movimientos alta/baja (`adherent_incorporations.movement_type` y sus 8 columnas) | ✅ | ❌ |
+| `clients.hr_contact_*` y las 2 plantillas de empresa | ✅ | ❌ |
+
+> ⚠️ **El módulo NO está en producción.** Llevarlo requiere las migraciones
+> `20260813*`, `20260817*`, `20260818*`, `20260819*`, `20260822*` y `20260908*`,
+> más las columnas de arriba. Es un trabajo aparte, con su propio runbook.
+
+---
+
+## Venta a EMPRESA: nómina de empleados y movimientos de alta/baja
+
+> Aplicado el **2026-09-08** (migraciones `20260908000001`…`20260908000006`).
+> **Sólo en US test.** Ver *Estado por entorno*.
+
+### El modelo: UN contrato, empleados anidados
+
+Un contrato corporativo es **una sola venta** (`clients.client_type='empresa'`)
+cuyos `beneficiaries` forman **exactamente dos niveles**:
+
+```
+VENTA  titular_amount = 0 · plan_id = plan de referencia · total = suma de la nómina ACTIVA
+├─ member_role='empleado'  parent=NULL  plan_id=ORO    amount=1.200.000
+│    ├─ member_role='adherente'  parent=↑  plan_id=ORO    amount=300.000
+│    └─ member_role='adherente'  parent=↑  plan_id=PLATA  amount=250.000
+└─ member_role='empleado'  parent=NULL     plan_id=PLATA  amount=900.000
+```
+
+Una venta a **persona física no cambia en nada**: sus filas nacen con los
+defaults `member_role='adherente'`, `parent_beneficiary_id=NULL`, `plan_id=NULL`.
+
+**No hay `sale_type` nuevo.** Una venta de empresa sigue siendo `venta_nueva` o
+`reingreso`; lo que la distingue es el `client_type` del titular.
+
+**La empresa NO es beneficiaria de sí misma**: no hay fila de titular, no hay
+`is_primary`, y `titular_amount` es 0. Por eso `enhancedTemplateEngine` saltea
+el `titularFallback` cuando `isCompanyClient(client)` — sin eso imprimía una
+fila fantasma con la razón social cobrando el total entero, encima de la nómina.
+
+### Integridad de la jerarquía: una FK compuesta, no un trigger
+
+```sql
+CONSTRAINT uq_beneficiaries_id_sale UNIQUE (id, sale_id)
+CONSTRAINT fk_beneficiaries_parent
+  FOREIGN KEY (parent_beneficiary_id, sale_id)
+  REFERENCES beneficiaries (id, sale_id) ON DELETE CASCADE
+```
+
+Esa FK expresa de forma **declarativa** que el empleado del que cuelga un
+adherente pertenece a la MISMA venta, y el `ON DELETE CASCADE` hace que borrar
+un empleado se lleve a sus adherentes sin código de aplicación. El `UNIQUE`
+redundante con la PK es el requisito de Postgres para referenciar ese par.
+
+Lo único que no entra en un CHECK ni en una FK (es entre filas) es "el padre
+tiene que ser un empleado", y de eso se ocupa
+`trg_beneficiaries_validate_nomina`, que además impide degradar a un empleado
+que tiene gente a cargo. Corre **después** de
+`trg_beneficiaries_block_when_sale_signed` por orden alfabético, que es lo
+correcto.
+
+### La baja NO borra
+
+Dar de baja pone `beneficiaries.status='inactive'` + `coverage_end_date`. La
+fila se conserva: es la historia de la nómina y es a lo que apunta el anexo
+firmado. `'inactive'` ya estaba en `beneficiaries_status_check` desde antes —
+**ese CHECK no se toca**, porque también admite
+`'pending_addendum_signature'`, del flujo legado `sale_addendums`.
+
+`recalculate_sale_total_amount(uuid)` ahora filtra
+`COALESCE(status,'active')='active'` en sus dos lecturas. Sigue siendo la
+**única fuente de verdad** del total. De paso se eliminó la quinta fórmula que
+quedaba en el front: `SaleTabbedForm` → *Enviar a Auditoría* recalculaba en JS
+y hacía un `UPDATE sales` (bug #10); ahora llama a la RPC.
+
+### Movimientos: alta y baja comparten anexo, serie y `sale_type`
+
+La pestaña *Incorporaciones* pasó a llamarse **Movimientos** (el `value` de la
+tab sigue siendo `incorporaciones`, para no romper `tabOrder` ni los enlaces).
+Las dos operaciones crean una venta-operación con
+`sale_type='alta_adherente'` → serie `ANX-YYYY-NNNNNN`, y se distinguen por
+`adherent_incorporations.movement_type` (`'alta'` | `'baja'`).
+
+Al firmarse, `activate_adherent_incorporation()` bifurca:
+
+- **alta**: copia la persona al contrato madre, ahora también con `member_role`,
+  `plan_id` y el `parent_beneficiary_id` resuelto desde
+  `parent_target_beneficiary_id`.
+- **baja**: pasa a `inactive` al `target_beneficiary_id` y, si
+  `cascade_dependents`, a sus adherentes; deja la traza en
+  `deactivated_beneficiary_ids`.
+
+> ⚠️ **La trampa más peligrosa de todo el módulo.** El loop de alta filtra
+> `activated_beneficiary_id IS NULL AND parent_sale_id IS NOT NULL`, y eso
+> **también matchea las filas de baja** (que tienen poblado
+> `operation_beneficiary_id`). Sin el `AND COALESCE(movement_type,'alta')='alta'`
+> que se le agregó, firmar una baja **copiaría a la persona al contrato madre**,
+> en silencio y al revés de lo pedido. Si alguna vez se reescribe esa función,
+> ese filtro no se puede perder.
+
+> La función se reemplaza siempre con **el mismo nombre y la misma firma**: es
+> una de las 4 que `trg_beneficiaries_block_when_sale_signed` exime por
+> `PG_CONTEXT`. Por eso **no** hace falta `set_config`, y no se toca el regex.
+
+#### Un alta puede traer un empleado CON su grupo familiar (2026-09-09)
+
+Antes un alta era de un solo rol, y sumar a alguien con su familia costaba dos
+movimientos y dos ceremonias de firma. Ahora el formulario de alta de empresa
+anida los adherentes bajo cada empleado (`adherentesPorFila` en
+`SaleIncorporationsTab`), y el vínculo se guarda **dentro de la venta-operación**:
+el adherente nace con `parent_beneficiary_id` apuntando al empleado de esa misma
+venta, que es lo único que la FK compuesta `fk_beneficiaries_parent` permite. Por
+eso `useCreateAdherentIncorporation` inserta en **dos pasadas** (primero los
+empleados, después sus adherentes).
+
+`activate_adherent_incorporation` lo traduce al contrato madre
+(`20260910000004`): activa los **empleados primero** (`ORDER BY`) y, si
+`parent_target_beneficiary_id` no resuelve contra la madre, sigue el
+`parent_beneficiary_id` del beneficiario de la operación hasta la fila hermana de
+`adherent_incorporations` y de ahí a su `activated_beneficiary_id`. También copia
+`requires_adherents` / `maternity_bonus`.
+
+> `parent_target_beneficiary_id` (empleado que YA vive en la madre) y
+> `parent_row_index` (empleado que entra en ESTE movimiento) son excluyentes: el
+> primero no puede usarse para el segundo porque cuando se arma el alta ese
+> empleado todavía no existe en ningún contrato.
+
+### Por qué una baja inserta beneficiarios que no firman
+
+`useCreateNominaTermination` inserta el snapshot de quienes salen como
+beneficiarios de la venta-operación, con **`signature_required=false` y
+`status='inactive'`**. Esa combinación es la que hace que el anexo funcione sin
+motor de plantillas nuevo:
+
+- `useCreateAllSignatureLinks.ts:101` y `SaleTemplatesTab.tsx` saltean a quien
+  tiene `signature_required === false` → **no** se les genera DDJJ ni enlace de
+  firma; firman sólo el representante de la empresa y la contratada;
+- el loop `{{#beneficiarios}}` los imprime igual, que es lo que el anexo debe
+  decir;
+- `status='inactive'` hace que el total de la venta-operación quede en **0** sin
+  pisarlo a mano — correcto, porque una baja no factura y `total_amount` es la
+  base de cálculo de la comisión.
+
+### Plantillas y motor
+
+| Plantilla | `template_type` | Archivo |
+|---|---|---|
+| Contrato Colectivo de Empresa | `contrato_empresa` | `docs/plantilla-contrato-empresa.html` |
+| Anexo de Movimiento de Nomina | `anexo_movimiento` | `docs/plantilla-anexo-movimiento.html` |
+
+Placeholders nuevos: `{{rol}}`, `{{depende_de}}`, `{{plan_nombre}}` (por fila),
+`{{movimiento}}` / `{{movimiento_fecha}}` (globales, los adosa
+`attachGroupMonthlyTotal`), `{{titular_documento}}` /
+`{{titular_documento_label}}` (RUC vs C.I.), y el loop anidado
+`{{#empleados}}` … `{{#sus_adherentes}}` … `{{/sus_adherentes}}` …
+`{{/empleados}}`, con `{{cantidadAdherentes}}` y `{{subtotalFormateado}}`.
+
+El agrupador vive en **`src/lib/nomina.ts`** y lo comparten la pantalla y el
+motor, para que la tabla que se ve al cargar y la que sale impresa no puedan
+discrepar.
+
+> Las dos plantillas llevan `{{firma_*}}`, así que `SaleTemplatesTab` las
+> clasifica como `document_type='contrato'`. **Es correcto y no hay que
+> "corregirlo"**: `finalize-signature-link` saltea los `'anexo'`.
+
+### Cómo aplicarlo en una base
+
+`sql/aplicar-nomina-empresa-test-PASO1.sql` (esquema, funciones y triggers) y
+después `sql/aplicar-nomina-empresa-test-PASO2.sql` (las 2 plantillas). Los dos
+son idempotentes y el PASO 1 **aborta solo** si el filtro por `status` fuera a
+cambiar el total de alguna venta existente. Después, regenerar `types.ts`.
+
+> **Aplicado en US test el 2026-09-08** (las 13 filas de verificación en `OK`) y
+> `types.ts` regenerado. Para probar que las guardas de la jerarquía además
+> *funcionan* —y no sólo que existen— está
+> `sql/verificar-nomina-empresa-test.sql`, que corre entero dentro de
+> `BEGIN … ROLLBACK` y no escribe nada.
+
+> Un par de hooks leen `adherent_incorporations` con `select('*')` + cast en vez
+> de enumerar columnas. Es deliberado: esa tabla ya cambió de forma tres veces y
+> cada vez habría que tocar todos los selects. Además, encadenar un `.eq()` de
+> más sobre `beneficiaries` hacía explotar la inferencia de PostgREST
+> (*"Type instantiation is excessively deep"*), así que ese filtro se hace en
+> memoria.
+
+---
+
+### ⚠️ Editar/cancelar un anexo: gatear por la VENTA-OPERACIÓN, nunca por el anexo
+
+`adherent_incorporations.status` y `plan_changes.status` **nunca pasan por
+`sent` ni `signed`**: nadie los escribe. El único salto real es
+`draft → completed`, y lo hace el trigger recién cuando la venta-operación
+llega a `completado`. O sea que mientras el titular ya firmó y falta la
+contratada, la venta-operación está en `firmado` pero el anexo sigue en `draft`.
+
+Gatear los botones Editar/Cancelar por el status del anexo deja esa ventana
+abierta, y ahí:
+
+- **Incorporación**: el UPDATE de `adherent_incorporations` pasa (el guard de
+  `20260818000003` sólo mira `OLD.status <> 'draft'`) y después explota con
+  **42501** al tocar el beneficiario del contrato firmado. Sin transacción:
+  queda el snapshot editado y el beneficiario sin tocar.
+- **Cambio de plan**: peor — el update sólo toca `plan_changes` y `sales`, no
+  hay guard de base, así que **reescribe el `members_snapshot` de un formulario
+  ya firmado en silencio**.
+
+En ambos casos el PDF firmado no se regenera y queda diciendo otra cosa que la base.
+
+**Se gatea por `operation_sale.status`** (`OP_EDITABLE = ['borrador']`,
+`OP_CANCELABLE = ['borrador','enviado','pendiente']`), en los hooks Y en la UI.
+Si algún día se escriben de verdad los estados `sent`/`signed` del anexo, esta
+guarda puede simplificarse — hasta entonces, no sacarla.
+
+### ⚠️ La RLS de `templates` no aísla por empresa
+
+La política **"Gestors can manage templates"** es `FOR ALL` con
+`USING (has_role(super_admin) OR has_role(admin) OR has_role(gestor))` —
+**sin `company_id`**. Como las políticas permisivas se combinan con OR, esa
+sola alcanza: cualquier admin o gestor ve (y puede editar) las plantillas de
+**todas** las empresas, aunque exista también "Users can view company templates".
+
+No se notaba porque las 9 plantillas históricas eran todas de la misma empresa.
+Al sembrar las plantillas de los tipos de venta para cada empresa, el selector
+de la venta pasó a mostrarlas **duplicadas**.
+
+**Mitigado en el front**: `SaleTemplatesTab` recibe `companyId` (la empresa de
+la venta) y filtra `availableTemplates` por ella. Es lo correcto para todos los
+roles, super_admin incluido: el selector de UNA venta debe ofrecer sólo las
+plantillas de SU empresa.
+
+> La RLS sigue permisiva. Arreglarla es un cambio de seguridad aparte: habría
+> que scopear esa política por `company_id` y verificar que no rompa al
+> super_admin ni al diseñador de plantillas.
+
+### Deuda conocida de este módulo
+
+- **`auto_advance_sale_status` tiene DOS triggers** sobre `signature_links`
+  (`auto_advance_sale_status_trigger` y `trg_auto_advance_sale_status`, misma
+  función). Es idempotente y no rompe, pero es redundante.
+- **`sale_addendums` / `sale_addendum_beneficiaries`**: flujo legado anterior a
+  `adherent_incorporations`. Ningún componente los usa (sólo aparecen en
+  `types.ts`), pero las funciones `approve_sale_addendum` y
+  `try_complete_sale_addendum_for_link` sí los tocan y están **exentas** del guard
+  `trg_beneficiaries_block_when_sale_signed`. **No borrar.**
+- **`complete_adherent_incorporation(uuid)`** es legado: versión de UN solo
+  adherente, sin recálculo del total. No la llama nadie; la activación real la
+  hace el trigger. Versionada en `20260822000003` sólo porque `20260818000002`
+  la exime por nombre y su preflight aborta si falta.
+- **Una venta-operación de CAMBIO DE PLAN no tiene beneficiarios**: `CMB-*` lleva
+  su importe directo en `sales.total_amount`, puesto por `useCreatePlanChange`.
+  Dos consecuencias: (1) su total NO se puede validar contra la fórmula de
+  `recalculate_sale_total_amount` —un control que lo intente marca falsos
+  positivos, pasó al aplicar `20260908000004`—; y (2) llamar a esa RPC sobre una
+  de esas ventas le pondría el total en **cero**. Hoy no ocurre: el trigger
+  dispara sobre `beneficiaries` y esas ventas no tienen ninguno, y
+  `activate_plan_change` recalcula el contrato **madre**, no la operación.
+- **El historial de migraciones de test está divergente del repo**: hay 12
+  versiones del repo sin registrar en `supabase_migrations.schema_migrations`
+  (sus objetos SÍ existen, se aplicaron por SQL directo) y 5 versiones en test
+  que el repo no tiene. Por eso las migraciones se aplican con scripts de `sql/`
+  y no con `db push`.
 
 ---
 
@@ -308,9 +651,29 @@ Al parsear fechas ISO (`"1981-05-09"`) con `new Date()`, JavaScript lo interpret
 **Fix**: Usar `dateStr.split('-')` para parsear, nunca `new Date(dateStr)`.
 
 ### 2. `generate-base-pdf` sobreescrita en cada deploy
-Cada deploy de Lovable sobreescribe la función con su versión que no funciona con el renderer.
+Cada deploy de Lovable sobreescribe la función con su versión que no funciona con el renderer
+(`displayHeaderFooter: true` + imágenes base64 → header/footer vacíos).
 
-**Fix**: El administrador del sistema debe restaurar la función v82 después de cada deploy de Lovable.
+**Síntoma**: los PDFs salen sin encabezado ni zócalo. **No es específico de una plantilla**:
+si la función está pisada, ningún PDF de ese entorno tiene branding.
+
+**Fix**: redesplegar la v82. Desde el `2026-09-07` el archivo del repo **es** la v82, así que
+alcanza con:
+
+```bash
+npx supabase@2.111.0 functions deploy generate-base-pdf --project-ref <ref> --no-verify-jwt
+```
+
+`<ref>` = `ejiycfqxgtrzaysgpzmx` (BR prod) o `ykducvvcjzdpoojxlsig` (US test). **Siempre
+explícito**: `supabase/config.toml` apunta a BR, y un deploy sin `--project-ref` va a producción.
+
+**Verificar antes de dar por hecho el diagnóstico** (no asumir que la función está bien):
+
+```
+mcp__claude_ai_Supabase__get_edge_function(project_id=..., function_slug='generate-base-pdf')
+```
+Debe contener `print-shell`, `table-header-group` y `displayHeaderFooter: false`. Si tiene
+`headerTemplate` o `displayHeaderFooter: true`, está pisada.
 
 ### 3. Nombre del firmante en minúscula
 Al escribir el bloque de firma en `documents.content`, el nombre del firmante a veces se lowercasea.
@@ -494,7 +857,73 @@ Mitigación inmediata sin setup: **no dejar `npm run dev` corriendo** apuntando 
 > ⚠️ La clave que aparece en `client.ts`/`.env` es la `anon` **pública** (protegida por RLS), no
 > es un secreto. NO poner nunca la `service_role` key en el front ni en archivos versionados.
 
-### 10. Bucle de links fantasma de la contratada ("Pendiente" aunque ya firmó)
+### 10. `sales.total_amount` se calculaba en CUATRO lugares con fórmulas distintas
+
+**Síntoma**: a una venta le falta plata en el total, típicamente **exactamente el monto del
+titular**. Aparece y desaparece según el orden en que se guardó, así que es difícil de reproducir.
+
+**Causa**: había cuatro implementaciones del mismo cálculo:
+
+| Dónde | Fórmula | ¿Correcta? |
+|---|---|---|
+| `recalculate_sale_total_amount(p_sale_id uuid)` | contempla `is_primary` | ✅ |
+| `useBeneficiaries.ts` (frontend) | idéntica a la anterior | ✅ |
+| **`recalculate_sale_total_amount()`** (la del trigger) | **`SUM(amount)` a secas** | ❌ |
+| **`SaleTabbedForm.tsx`** (al guardar la venta) | **`titular_amount + Σ(no primarios)`** | ❌ |
+
+El trigger `trg_recalculate_sale_total` dispara en cada alta/edición/baja de adherente y pisaba
+el total ignorando `titular_amount`: si el titular no existe como fila beneficiaria, **su monto
+desaparece**. La cuarta fórmula sólo coincidía con la de la base cuando el monto del primario
+era igual a `titular_amount`.
+
+Verificado en test antes de arreglarlo: de 22 ventas, 2 tenían el total mal, y en una de ellas
+faltaban exactamente los 275.000 del titular.
+
+**Fix aplicado** (`20260818000001_fix_total_amount_single_source.sql`): la versión con argumento
+queda como **única fuente de verdad**; la del trigger sólo delega en ella; las dos del frontend
+se eliminaron (`SaleTabbedForm` ahora llama a la RPC). Incluye backfill con `RAISE NOTICE`.
+
+> ⚠️ Si un deploy de Lovable reintroduce el cálculo en `useBeneficiaries.ts` o en
+> `SaleTabbedForm.tsx`, el bug vuelve. El total lo calcula **sólo la base**.
+
+### 11. Adherentes editables en contratos ya firmados
+
+**Síntoma**: se podían agregar, editar o borrar adherentes de un contrato `firmado` o
+`completado`, dejando la base diciendo una cosa y el PDF con firma PAdES otra.
+
+**Causa**: el bloqueo era sólo visual (una prop `disabled` que escondía botones) y
+`BeneficiariesManager` ni siquiera la recibía. Además `isSaleLocked` exime a 5 roles.
+
+**Fix aplicado**, en tres capas: `canMutateBeneficiaries` (`src/lib/saleUtils.ts`, **sin
+excepciones por rol**), una guarda en los hooks de `useBeneficiaries`, y el trigger
+`trg_beneficiaries_block_when_sale_signed` (`20260818000002`).
+
+> **2026-09-09** — faltaba la cuarta capa, la que se ve: `SaleTabbedForm` gateaba las
+> pestañas Nómina/Adherentes con `isSaleLocked`, que **sí exime a los 5 roles
+> privilegiados**, así que un admin llenaba el formulario entero sobre un contrato
+> firmado y recién al grabar chocaba con el guard. Y como los `catch` de esas pestañas
+> sólo hacían `console.error`, el usuario veía un botón mudo. Ahora se gatean con
+> `canMutateBeneficiaries`, hay un banner que explica el motivo y lleva a Movimientos, y
+> todos los `catch` muestran `toast.error`. Si un deploy de Lovable revierte esto, el
+> síntoma vuelve a ser "el botón Guardar no hace nada".
+
+Las 4 funciones del sistema que **deben** poder escribir en un contrato firmado
+(`activate_adherent_incorporation`, `complete_adherent_incorporation`, `approve_sale_addendum`,
+`try_complete_sale_addendum_for_link`) quedan eximidas **desde el propio trigger**, que mira la
+pila de llamadas con `GET DIAGNOSTICS ... PG_CONTEXT`. Ninguna de las 4 se toca.
+
+> El primer intento eximía con `ALTER FUNCTION ... SET app.allow_signed_beneficiary_mutation`,
+> y **nunca se pudo aplicar**: esa GUC es un *placeholder* y PostgreSQL exige superusuario para
+> fijarla por `ALTER FUNCTION/ROLE/DATABASE` → `42501: permission denied to set parameter`.
+> El módulo de comisiones no sufre esto porque usa `set_config(..., true)` **dentro** del cuerpo
+> de cada RPC, no `ALTER FUNCTION`. Acá no se podía copiar ese patrón: 3 de las 4 funciones no
+> están en el repo (sólo existen en la base) y un `CREATE OR REPLACE` a ciegas las rompería.
+
+> ⚠️ Si se agrega otra función del sistema que modifique adherentes de un contrato firmado, hay
+> que sumarla al regex de exención del trigger o fallará con `42501`. Debe ser **PL/pgSQL**: una
+> función en SQL plano no aparece en `PG_CONTEXT`. El preflight de la migración aborta si alguna
+> de las exentas no lo es, así que el trigger nunca queda instalado sin salida.
+### 12. Bucle de links fantasma de la contratada ("Pendiente" aunque ya firmó)
 
 **Síntoma**: En **Gestionar Firma**, el card *Firma de la Contratada* muestra **Pendiente**
 aunque la contratada ya firmó, y **el estado cambia al recargar la página**. La venta queda
@@ -558,7 +987,7 @@ where recipient_type='contratada' and step_order = 1
 group by sale_id;
 ```
 
-### 11. Contrato final SIN la firma del titular + HTML corrupto `<div <div` + contratos duplicados
+### 13. Contrato final SIN la firma del titular + HTML corrupto `<div <div` + contratos duplicados
 
 **Síntoma**: una venta muestra **varios contratos "finales"** (caso real: 2026-000207 con 5, y hasta
 20 filas de contrato) y en todos el bloque de firma dice solo *"Firmado electrónicamente por: Eder
@@ -651,44 +1080,42 @@ dentro de la misma transacción**.
 **Síntoma**: Los PDFs salen sin encabezado ni zócalo.
 **Causa**: Lovable usa `displayHeaderFooter: true` en el renderer, que no soporta imágenes base64. La versión correcta de producción (v82+) usa **tabla HTML con `<thead>/<tfoot>`** y `displayHeaderFooter: false`.
 
-Hay 3 caminos para restaurarla, en orden de preferencia:
-
-#### Opción A — Pedírselo a Claude (más simple)
-Decirle: **"Restaurá generate-base-pdf"**
-
-Claude tiene el código correcto guardado en contexto y lo redespliega usando la API de Supabase MCP (`mcp__supabase__deploy_edge_function`) en ~30 segundos.
-
-#### Opción B — Supabase CLI (recomendada si Claude no está disponible)
-
-Tener el código correcto guardado localmente y desplegar con:
+Desde el `2026-09-07` **el archivo del repo es la v82**, así que restaurar es un solo comando:
 
 ```bash
-supabase functions deploy generate-base-pdf \
-  --project-ref ejiycfqxgtrzaysgpzmx \
-  --no-verify-jwt
+# BR producción
+npx supabase@2.111.0 functions deploy generate-base-pdf \
+  --project-ref ejiycfqxgtrzaysgpzmx --no-verify-jwt
+
+# US test
+npx supabase@2.111.0 functions deploy generate-base-pdf \
+  --project-ref ykducvvcjzdpoojxlsig --no-verify-jwt
 ```
 
-#### Opción C — Script de restauración rápida
+> ⚠️ `--project-ref` **siempre explícito**: `supabase/config.toml` apunta a BR y un deploy
+> sin ese flag va a producción. En PowerShell usar `npx.cmd` (los `.ps1` están bloqueados).
+> No hace falta Docker: el CLI sube el archivo tal cual (avisa `WARNING: Docker is not running`
+> y despliega igual).
 
-Crear `restore-generate-pdf.sh`:
+Alternativa sin CLI: pedirle a Claude **"Restaurá generate-base-pdf"** — redespliega el
+archivo del repo, o lo baja de prod con
+`mcp__claude_ai_Supabase__get_edge_function(project_id='ejiycfqxgtrzaysgpzmx', function_slug='generate-base-pdf')`
+si el archivo local estuviera pisado.
 
-```bash
-#!/bin/bash
-echo "Restaurando generate-base-pdf v82 (thead/tfoot con branding)..."
+**Verificación post-restore**:
 
-supabase functions deploy generate-base-pdf \
-  --project-ref ejiycfqxgtrzaysgpzmx \
-  --no-verify-jwt \
-  --import-map ./supabase/functions/generate-base-pdf/deno.json
+1. `get_edge_function` sobre el proyecto → el código debe contener `print-shell`,
+   `table-header-group` y `displayHeaderFooter: false`. Si aparece `headerTemplate`, quedó
+   la versión rota.
+2. Generar un PDF de prueba y confirmar el encabezado/zócalo. En los logs de la función,
+   la v82 imprime `[header] OK …b` y `[footer] OK …b`; un `FAIL` significa que no pudo
+   descargar la imagen de branding de `company_settings`.
+3. Los PDFs **ya firmados** con la versión rota no se arreglan solos: hay que regenerarlos
+   con **"Regenerar con Encabezado"** (`admin_regeneration: true`), que crea una
+   `document_print_versions` con branding sin tocar el PDF sellado con PAdES.
 
-echo "✅ Función restaurada correctamente"
-```
-
-Ejecutar: `bash restore-generate-pdf.sh`
-
-**Verificación post-restore**: generar un PDF de prueba y confirmar que el encabezado/zócalo aparecen. Si no aparecen, la versión desplegada NO es la correcta — revisar que el archivo local tenga `displayHeaderFooter: false` y `margin: 0` con tabla `thead/tfoot`.
-
-> ⚠️ **No commitear cambios a `supabase/functions/generate-base-pdf/index.ts`** después de restaurar. La fuente de verdad es la **versión desplegada**, no el archivo del repo. Si el archivo local difiere de v82+, descartar los cambios locales con `git checkout supabase/functions/generate-base-pdf/`. Restaurar ≠ modificar.
+> ⚠️ Restaurar ≠ modificar. Si el archivo local difiere de la v82, no lo "mejores":
+> comparalo contra la función desplegada en **prod**, que es la referencia.
 
 ### Regenerar PDFs con branding
 ```
@@ -741,6 +1168,115 @@ contratada_signer_dni: 3616083
 contratada_signature_mode: link
 contratada_signer_phone: 976122957
 ```
+
+## Módulo de Comisiones (solo en US test — NO está en producción)
+
+> Estado al 2026-08-04: desplegado **únicamente** en `ykducvvcjzdpoojxlsig` (US test).
+> En BR producción las tablas **no existen**. Plan y runbook completos en
+> [docs/PLAN-COMISIONES.md](docs/PLAN-COMISIONES.md) y
+> [docs/runbooks/commission-us-test.md](docs/runbooks/commission-us-test.md).
+
+### Tablas
+
+| Tabla | Descripción |
+|---|---|
+| `commission_settings` | Config por empresa: `is_enabled`, `accrual_event`, prefijo y secuencia de liquidación |
+| `commission_salespeople` | Vendedores habilitados + `default_percent` / `default_base` de respaldo |
+| `commission_plan_settings` | Mapeo plan → `INDIVIDUAL` / `GRUPAL`. **Sin UI todavía**: se carga por SQL |
+| `commission_rules` | Matriz de reglas: vendedor, plan, tipo de venta, tipo de grupo |
+| `commission_periods` | Liquidaciones |
+| `commission_items` | Ítems liquidados, con snapshot inmutable |
+
+### Reglas del módulo que NO hay que romper
+
+- **`commission_items.sale_id` es `ON DELETE RESTRICT`**, a diferencia de todo lo
+  demás que cascadea desde `sales`. Borrar una venta no puede borrar un ítem ya
+  liquidado: es dato contable.
+- **`commission_periods` y `commission_items` sólo se mutan vía RPC.** Un trigger
+  (`commission_require_rpc_mutation`) rechaza cualquier INSERT/UPDATE/DELETE
+  directo que no venga de las funciones del módulo.
+- **Nunca se asume 0%.** Sin regla aplicable y sin `default_percent`, el cálculo
+  devuelve `no_rule` y bloquea la generación del período.
+- **Resolución de reglas**: `priority DESC`, luego especificidad, luego
+  `valid_from DESC`, luego `id`. Determinista, sin empates al azar.
+- **Redondeo** según `company_currency_settings.decimal_places`, default **0**
+  (guaraníes enteros).
+- `rule_snapshot.source` distingue `'rule'` de `'salesperson_default'`.
+
+### Reporte de liquidación en Excel (aplicado en US test el 2026-10-08)
+
+Reproduce la planilla "Comisiones <mes>.xlsx" (una hoja por vendedor + Resumen).
+**Todo es aditivo** (`20261007000001_commission_report_additive.sql`, script
+`sql/aplicar-comisiones-reporte-test.sql`): ninguna regla existente cambia de
+resultado, y el script aborta si cambia un solo cálculo o un período.
+
+| Pieza | Qué es |
+|---|---|
+| Base `net_of_fee_and_tax` | `(total − gasto adm.) / tax_divisor`. Es una rama **nueva** del `CASE`; las otras 3 bases quedan byte a byte. Requiere una fila vigente en `commission_admin_fees` (se carga **por SQL**, no hay UI): sin ella el cálculo da `admin_fee_not_configured` |
+| `commission_period_adjustments` | viático / recupero / bonificación / adicional / descuento / otro. Sólo por RPC (`commission_add_adjustment`, `commission_delete_adjustment`, `commission_suggest_maternity_adjustments`) y **sólo con el período en `borrador`** |
+| `commission_period_payable` | Vista: `total_a_cobrar = Σ ítems + Σ ajustes`. `commission_periods.total_amount` **no cambia**: sigue siendo Σ ítems |
+| `commission_export_rows(uuid[])` | Filas del Excel (código de plan, vidas, snapshot de la base) |
+| `commission_settings.tax_divisor` / `.maternity_extra_amount`, `commission_plan_settings.report_code` | Parámetros de presentación; se cargan por SQL |
+
+- **Front**: `src/lib/commissions/exportLiquidacionXlsx.ts` (exceljs, import dinámico), botón
+  *Exportar Excel* en el detalle y *Exportar Resumen* (rango de fechas) en la lista. Las FILAS
+  llevan los valores del **snapshot** (lo liquidado es inmutable); subtotales, pie y Resumen
+  son fórmulas. La plantilla de la Fase 1 es `scripts/comisiones/build_plantilla_liquidacion.py`
+  y **comparten diseño**: si se cambia una, cambiar la otra.
+- **El diseño es el de la planilla original del cliente** (desde el 2026-10-08; antes era un
+  bloque fijo arriba con la tabla en la fila 13, y el cliente lo rechazó). Lleva bandas negra y
+  gris arriba, columnas A–O (`Rec N°` … `Comision`, `Adicional`, `Obs`), subtotal gris y la sección
+  `EMPRESARIALES` aparte para lo GRUPAL. Después van la franja negra y, abajo, el pie (etiqueta en
+  K, valor en M) hasta `TOTAL A COBRAR`. El Resumen lleva `Bonif 8/12/15%`, `Otros` y `Prueba`.
+  `Rec N°` sale vacío: el sistema no guarda el medio de cobro.
+- ⚠️ **No copiar las fórmulas del Resumen viejo**: tenían las referencias corridas (`#REF!`, y la
+  comisión de un vendedor se leía de la franja negra). El export apunta **directo** a la celda de
+  cada hoja, porque el generador sabe dónde cae. La plantilla usa **nombres de ámbito hoja +
+  `INDIRECT`**, porque ahí el usuario agrega filas y vendedores. `Prueba` suma los `TOTAL A COBRAR`
+  de las hojas y se pinta de rojo si no coincide con el Total.
+- Las lecturas del export **paginan de a 1000** (`max_rows` de PostgREST corta en silencio).
+- Montos escritos a mano se parsean como es-PY (`"350.000"` = 350000): `src/lib/commissions/parseAmount.ts`.
+- ⚠️ El SQL Editor del dashboard **no conserva la sesión** entre sentencias (las `TEMP TABLE` del
+  preflight daban `42P01`), por eso la foto del "antes" vive en el esquema `cr_scratch`, que el
+  propio script crea y borra. Para un rollback garantizado correrlo como UNA transacción
+  (`psql -1` / `apply_migration`).
+- ⚠️ `generate-commission-pdf` devolvía 500 en US test (2026-10-07/08) por una **función desplegada
+  desactualizada**, no por el reporte ni por el renderer: la v2 de US test (deploy del 2026-08-04)
+  todavía hace `select ... promoter_type_code, promoter_type_name` sobre `commission_periods`, columnas
+  que `20260804210000_commission_remove_promoter_types.sql` eliminó (PostgREST 42703 → la función
+  responde 500 "Could not load commission period"). El archivo del repo ya estaba bien (commit `be889a7`).
+  **Corregido el 2026-10-08**: redesplegada (v3, por el MCP `claude_ai_Supabase`, con `verify_jwt=false` y
+  `_shared/rate-limiter.ts`) y probado el PDF de `LIQ-PRUEBA000001`. Ojo: si se vuelve a refactorizar el
+  esquema de comisiones, **hay que redesplegar esta función en US test**; nadie lo hace solo.
+- Sigue **sin estar en BR producción**.
+
+### Deploy — nunca a producción por accidente
+
+> ⚠️ **`db push` contra BR**: hoy la CLI lo rechaza porque el historial de prod tiene 89
+> versiones sin archivo en el repo (*"Remote migration versions not found…"*). Esa es la única
+> barrera que impide aplicar en prod las migraciones de comisiones que el pase de la Entrega A
+> excluye. **Nunca correr `supabase migration repair` contra `ejiycfqxgtrzaysgpzmx`**, aunque la
+> CLI lo sugiera. El repo local suele estar linkeado a BR (`supabase/.temp/project-ref`):
+> `npx supabase unlink` evita que un comando sin `--project-ref` vaya a prod.
+
+`supabase/config.toml` apunta a **BR producción**, así que cualquier `db push` o
+`functions deploy` sin `--project-ref` va a prod. Usar siempre los scripts:
+
+```bash
+npm.cmd run commission:db:dry-run:us
+npm.cmd run commission:db:push:us
+npm.cmd run commission:function:deploy:us
+```
+
+El wrapper `scripts/commission-us-guard.mjs` rechaza el ref de BR, exige
+`CONFIRM_SUPABASE_US` y siempre corre un dry-run antes de aplicar.
+
+> Notas de entorno Windows, aprendidas a golpes:
+> - En PowerShell usar **`npm.cmd`/`npx.cmd`**: los `.ps1` están bloqueados por ExecutionPolicy.
+> - `SUPABASE_US_DB_URL` debe ser la del **Session pooler** (puerto 5432). La conexión
+>   directa `db.<ref>.supabase.co` sólo tiene registro IPv6 y no resuelve desde IPv4.
+> - Al regenerar `types.ts` usar `| Out-File -Encoding utf8`; el `>` de PowerShell 5.1
+>   escribe UTF-16LE y rompe el archivo.
 
 ## graphify
 

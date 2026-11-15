@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useForm } from "react-hook-form";
+import { buildClientNamePayload } from "@/lib/clientUtils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -19,9 +20,27 @@ interface ClientFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   client?: Client | null;
+  /**
+   * Tipo con el que abre el formulario al crear un cliente nuevo.
+   *
+   * Lo usa el selector "Tipo de contratante" de la venta: si el vendedor ya
+   * eligió Empresa y aprieta "+", no tiene sentido que el diálogo abra en
+   * Persona física y le pida nombre y apellido. Al editar no aplica: ahí manda
+   * el tipo que el cliente ya tiene.
+   */
+  defaultClientType?: string;
 }
 
 interface ClientFormData {
+  /** 'persona' (por defecto) o 'empresa'. */
+  client_type: string;
+  razon_social?: string;
+  ruc?: string;
+  /** Contacto de RR.HH. de un cliente empresa: con quién se gestionan las
+   *  altas y bajas de nómina. No aplica a una persona física. */
+  hr_contact_name?: string;
+  hr_contact_phone?: string;
+  hr_contact_email?: string;
   first_name: string;
   last_name: string;
   email: string;
@@ -53,7 +72,7 @@ interface NominatimResult {
   };
 }
 
-export function ClientForm({ open, onOpenChange, client }: ClientFormProps) {
+export function ClientForm({ open, onOpenChange, client, defaultClientType }: ClientFormProps) {
   const { profile } = useSimpleAuthContext();
   const createClient = useCreateClient();
   const updateClient = useUpdateClient();
@@ -74,6 +93,8 @@ export function ClientForm({ open, onOpenChange, client }: ClientFormProps) {
     formState: { errors },
   } = useForm<ClientFormData>();
 
+  const clientTypeValue = watch("client_type") || "persona";
+  const esEmpresa = clientTypeValue === "empresa";
   const latitudeValue = watch("latitude");
   const longitudeValue = watch("longitude");
   const genderValue = watch("gender");
@@ -221,6 +242,12 @@ export function ClientForm({ open, onOpenChange, client }: ClientFormProps) {
 
     if (client) {
       reset({
+        client_type: (client as any).client_type || "persona",
+        razon_social: (client as any).razon_social || "",
+        ruc: (client as any).ruc || "",
+        hr_contact_name: (client as any).hr_contact_name || "",
+        hr_contact_phone: (client as any).hr_contact_phone || "",
+        hr_contact_email: (client as any).hr_contact_email || "",
         first_name: client.first_name || "",
         last_name: client.last_name || "",
         email: client.email || "",
@@ -240,6 +267,12 @@ export function ClientForm({ open, onOpenChange, client }: ClientFormProps) {
     }
 
     reset({
+      client_type: defaultClientType || "persona",
+      razon_social: "",
+      ruc: "",
+      hr_contact_name: "",
+      hr_contact_phone: "",
+      hr_contact_email: "",
       first_name: "",
       last_name: "",
       email: "",
@@ -255,7 +288,7 @@ export function ClientForm({ open, onOpenChange, client }: ClientFormProps) {
       latitude: "",
       longitude: "",
     });
-  }, [client, open, reset]);
+  }, [client, open, reset, defaultClientType]);
 
   const normalizePhone = (raw: string | undefined): string => {
     if (!raw) return "";
@@ -283,7 +316,32 @@ export function ClientForm({ open, onOpenChange, client }: ClientFormProps) {
       data.phone = normalizePhone(data.phone);
       data.birth_date = normalizeDateInputValue(data.birth_date) || undefined;
 
-      const { latitude: _lat, longitude: _lng, ...cleanData } = data;
+      const { latitude: _lat, longitude: _lng, ...rest } = data;
+      // Para una EMPRESA la razón social se guarda TAMBIÉN en first_name
+      // (con last_name vacío). Así los 77 lugares que componen el nombre como
+      // first_name + last_name siguen mostrándolo bien sin tocar 42 archivos,
+      // y no hace falta quitarle el NOT NULL a esas columnas.
+      const cleanData = {
+        ...rest,
+        ...buildClientNamePayload(rest),
+        // `gender` y `marital_status` tienen CHECK en la base: aceptan NULL o
+        // uno de sus valores, pero NO la cadena vacía. El formulario los
+        // inicializa en "" y para una empresa ni siquiera se muestran, así que
+        // sin esta normalización el INSERT falla con 23514
+        // (clients_gender_check). Afecta también a una persona a la que no se
+        // le eligió género.
+        gender: rest.gender?.trim() ? rest.gender : null,
+        marital_status: rest.marital_status?.trim() ? rest.marital_status : null,
+        // Contacto de RR.HH.: sólo existe para una empresa. Se guarda NULL (no
+        // cadena vacía) para que una persona física no arrastre campos
+        // corporativos, y para que cambiar un cliente de empresa a persona los
+        // limpie en vez de dejarlos escondidos.
+        hr_contact_name: esEmpresa && rest.hr_contact_name?.trim() ? rest.hr_contact_name.trim() : null,
+        hr_contact_phone: esEmpresa && rest.hr_contact_phone?.trim()
+          ? normalizePhone(rest.hr_contact_phone)
+          : null,
+        hr_contact_email: esEmpresa && rest.hr_contact_email?.trim() ? rest.hr_contact_email.trim() : null,
+      };
 
       if (isEditing && client) {
         await updateClient.mutateAsync({ id: client.id, ...cleanData });
@@ -313,18 +371,91 @@ export function ClientForm({ open, onOpenChange, client }: ClientFormProps) {
             </TabsList>
 
             <TabsContent value="data" className="space-y-4 pt-2">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="first_name">Nombre</Label>
-                  <Input id="first_name" {...register("first_name", { required: "El nombre es requerido" })} />
-                  {errors.first_name && <span className="text-xs text-destructive">{errors.first_name.message}</span>}
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="last_name">Apellido</Label>
-                  <Input id="last_name" {...register("last_name", { required: "El apellido es requerido" })} />
-                  {errors.last_name && <span className="text-xs text-destructive">{errors.last_name.message}</span>}
-                </div>
+              <div className="space-y-1.5">
+                <Label>Tipo de cliente</Label>
+                <Select
+                  value={clientTypeValue}
+                  onValueChange={(v) => setValue("client_type", v, { shouldDirty: true })}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="persona">Persona física</SelectItem>
+                    <SelectItem value="empresa">Empresa</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+
+              {esEmpresa ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="razon_social">Razón Social</Label>
+                    <Input
+                      id="razon_social"
+                      {...register("razon_social", {
+                        validate: (v) =>
+                          !esEmpresa || (v || "").trim() !== "" || "La razón social es requerida",
+                      })}
+                    />
+                    {errors.razon_social && (
+                      <span className="text-xs text-destructive">{errors.razon_social.message}</span>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ruc">RUC</Label>
+                    <Input id="ruc" placeholder="80012345-6" {...register("ruc")} />
+                  </div>
+
+                  {/* Contacto de RR.HH.: en un contrato corporativo las altas y
+                      bajas de nómina no las gestiona la razón social sino una
+                      persona concreta. El email/teléfono generales del cliente
+                      suelen ser los de administración y no sirven para esto. */}
+                  <div className="col-span-2 space-y-1.5 rounded-lg border border-border/70 bg-muted/20 p-3">
+                    <Label className="text-sm font-semibold">Contacto de RR.HH.</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Con quién se gestionan las altas y bajas de empleados.
+                    </p>
+                    <div className="grid grid-cols-3 gap-3 pt-1">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="hr_contact_name">Nombre</Label>
+                        <Input id="hr_contact_name" {...register("hr_contact_name")} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="hr_contact_phone">Teléfono</Label>
+                        <Input id="hr_contact_phone" placeholder="981123456" {...register("hr_contact_phone")} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="hr_contact_email">Email</Label>
+                        <Input id="hr_contact_email" type="email" {...register("hr_contact_email")} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="first_name">Nombre</Label>
+                    <Input
+                      id="first_name"
+                      {...register("first_name", {
+                        validate: (v) =>
+                          esEmpresa || (v || "").trim() !== "" || "El nombre es requerido",
+                      })}
+                    />
+                    {errors.first_name && <span className="text-xs text-destructive">{errors.first_name.message}</span>}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="last_name">Apellido</Label>
+                    <Input
+                      id="last_name"
+                      {...register("last_name", {
+                        validate: (v) =>
+                          esEmpresa || (v || "").trim() !== "" || "El apellido es requerido",
+                      })}
+                    />
+                    {errors.last_name && <span className="text-xs text-destructive">{errors.last_name.message}</span>}
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email</Label>
@@ -339,17 +470,23 @@ export function ClientForm({ open, onOpenChange, client }: ClientFormProps) {
                     <Input id="phone" className="rounded-l-none" placeholder="992950125" {...register("phone")} />
                   </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="dni">C.I.</Label>
-                  <Input id="dni" {...register("dni")} />
-                </div>
+                {!esEmpresa && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="dni">C.I.</Label>
+                    <Input id="dni" {...register("dni")} />
+                  </div>
+                )}
               </div>
 
+              {/* Fecha de nacimiento, género y estado civil no aplican a una empresa. */}
+              {!esEmpresa && (
               <div className="space-y-1.5">
                 <Label htmlFor="birth_date">Fecha de Nacimiento</Label>
                 <Input id="birth_date" type="date" {...register("birth_date")} />
               </div>
+              )}
 
+              {!esEmpresa && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>Género</Label>
@@ -379,6 +516,7 @@ export function ClientForm({ open, onOpenChange, client }: ClientFormProps) {
                   </Select>
                 </div>
               </div>
+              )}
             </TabsContent>
 
             <TabsContent value="location" className="space-y-3 pt-2">

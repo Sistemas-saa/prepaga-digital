@@ -8,7 +8,7 @@ import { SimpleAuthProvider } from "@/components/SimpleAuthProvider";
 import { CompanyBrandingProvider } from "@/components/CompanyBrandingProvider";
 
 // Helper: retry dynamic imports once then force-reload on chunk errors
-function lazyRetry<T extends ComponentType<Record<string, unknown>>>(importFn: () => Promise<{ default: T }>) {
+function lazyRetry<P>(importFn: () => Promise<{ default: ComponentType<P> }>) {
   return lazy(() =>
     importFn().catch((error: unknown) => {
       // If chunk failed to load, reload the page once
@@ -60,6 +60,8 @@ const FileManagement = lazyRetry(() => import("@/pages/FileManagement"));
 const PaymentSuccess = lazyRetry(() => import("@/pages/PaymentSuccess"));
 const PaymentCanceled = lazyRetry(() => import("@/pages/PaymentCanceled"));
 const QuestionnaireView = lazyRetry(() => import("@/pages/QuestionnaireView"));
+const Commissions = lazyRetry(() => import("@/pages/Commissions"));
+const CommissionPeriodDetail = lazyRetry(() => import("@/pages/CommissionPeriodDetail"));
 const NotFound = lazyRetry(() => import("@/pages/NotFound"));
 
 const PageLoader = () => (
@@ -145,6 +147,8 @@ const App = () => {
                   <Route path="signature-workflow" element={<SignatureWorkflow />} />
                   <Route path="signature-workflow/:saleId" element={<SignatureWorkflow />} />
                   <Route path="analytics" element={<Analytics />} />
+                  <Route path="comisiones" element={<RoleProtectedRoute allowedRoles={['super_admin', 'admin', 'financiero', 'supervisor', 'auditor']}><Commissions /></RoleProtectedRoute>} />
+                  <Route path="comisiones/:id" element={<RoleProtectedRoute allowedRoles={['super_admin', 'admin', 'financiero', 'supervisor', 'auditor', 'vendedor']}><CommissionPeriodDetail /></RoleProtectedRoute>} />
                   <Route path="incidents" element={<Incidents />} />
                   <Route path="incidents/new" element={<IncidentNew />} />
                   <Route path="incidents/:id" element={<IncidentDetail />} />

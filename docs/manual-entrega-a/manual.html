@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Manual de Pruebas — Entrega A · SAMAP Prepaga Digital</title>
+<style>
+  :root{
+    --tinta:#1a1f2b; --tinta-suave:#4a5568; --linea:#d9dee7;
+    --azul:#1e4fd8; --azul-suave:#eef2ff; --coral:#c0392b; --coral-suave:#fdecea;
+    --verde:#1f7a4d; --verde-suave:#e9f7f0; --gris:#f4f6fa; --ambar:#8a6d1f; --ambar-suave:#fdf6e3;
+  }
+  *{box-sizing:border-box;}
+  html{font-size:14.5px;}
+  body{
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--tinta); line-height:1.55; margin:0; background:#fff;
+  }
+  .page{max-width:840px; margin:0 auto; padding:26mm 20mm;}
+  h1,h2,h3,h4{line-height:1.2; color:var(--tinta); font-weight:700;}
+  h1{font-size:2.1rem; margin:0 0 .3em;}
+  h2{font-size:1.45rem; margin:2.2em 0 .6em; padding-bottom:.25em; border-bottom:2px solid var(--azul);}
+  h3{font-size:1.1rem; margin:1.6em 0 .4em; color:var(--azul);}
+  h4{font-size:.98rem; margin:1.2em 0 .3em;}
+  p{margin:.5em 0 .85em;}
+  ul,ol{margin:.4em 0 1em; padding-left:1.5em;}
+  li{margin:.28em 0;}
+  code{background:var(--gris); padding:.08em .35em; border-radius:3px; font-size:.86em;}
+
+  /* --- Figuras: recorte CSS de la franja muerta de la captura --- */
+  figure{margin:1em 0 1.3em; page-break-inside:avoid;}
+  .shot{
+    width:100%; aspect-ratio:1568/586; overflow:hidden;
+    border:1px solid var(--linea); border-radius:6px; background:#0f1420;
+  }
+  .shot img{width:100%; display:block; object-fit:cover; object-position:top left;}
+  .shot.full{aspect-ratio:auto;} .shot.full img{object-fit:contain;}
+  figcaption{font-size:.8rem; color:var(--tinta-suave); margin-top:.35em; font-style:italic;}
+
+  .nota{background:var(--azul-suave); border-left:4px solid var(--azul);
+    padding:.65em .95em; border-radius:0 6px 6px 0; margin:1em 0; font-size:.9rem;}
+  .alerta{background:var(--coral-suave); border-left:4px solid var(--coral);
+    padding:.65em .95em; border-radius:0 6px 6px 0; margin:1em 0; font-size:.9rem;}
+  .ojo{background:var(--ambar-suave); border-left:4px solid var(--ambar);
+    padding:.65em .95em; border-radius:0 6px 6px 0; margin:1em 0; font-size:.9rem;}
+
+  .chip{display:inline-block; background:var(--azul); color:#fff; font-size:.68rem;
+    font-weight:700; padding:.12em .6em; border-radius:999px; vertical-align:middle;}
+  .chip.neg{background:var(--coral);} .chip.pos{background:var(--verde);}
+
+  /* --- Casos de prueba --- */
+  .caso{border:1px solid var(--linea); border-left:5px solid var(--verde);
+    border-radius:6px; padding:.9em 1.1em; margin:1.4em 0; page-break-inside:avoid;}
+  .caso.neg{border-left-color:var(--coral);}
+  .caso > h4{margin:0 0 .5em; font-size:1.02rem;}
+  .caso .id{font-family:ui-monospace,Menlo,Consolas,monospace; color:var(--tinta-suave);
+    font-weight:700; margin-right:.5em;}
+  .caso ol{margin:.3em 0 .8em;}
+  .esperado{background:var(--verde-suave); border-left:4px solid var(--verde);
+    padding:.55em .9em; border-radius:0 5px 5px 0; margin:.7em 0 0; font-size:.9rem;}
+  .esperado.neg{background:var(--coral-suave); border-left-color:var(--coral);}
+  .datos{margin:.5em 0 .8em; font-size:.86rem;}
+  .datos th{width:32%;}
+
+  table{border-collapse:collapse; width:100%; margin:.9em 0; font-size:.86rem;}
+  th,td{border:1px solid var(--linea); padding:.45em .65em; text-align:left; vertical-align:top;}
+  th{background:var(--gris);}
+  .portada{min-height:66vh; display:flex; flex-direction:column; justify-content:center; border-bottom:none;}
+  .portada .sub{font-size:1.1rem; color:var(--tinta-suave); margin-top:.2em;}
+  .portada .meta{margin-top:2.6em; font-size:.88rem; color:var(--tinta-suave);}
+  .toc a{color:var(--tinta); text-decoration:none;}
+  .toc ol{list-style:decimal; padding-left:1.6em;}
+  .toc li{margin:.35em 0;}
+  .cap{page-break-before:always;}
+  @media print{
+    .page{max-width:none; margin:0; padding:15mm 13mm;}
+    h2{margin-top:0;}
+    a{color:var(--tinta); text-decoration:none;}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ PORTADA ============ -->
+  <section class="portada">
+    <h1>Manual de Pruebas — Entrega A</h1>
+    <div class="sub">Operaciones sobre contratos firmados y captura de datos ampliada<br>
+    SAMAP Prepaga Digital</div>
+    <div class="sub" style="margin-top:1.2em; font-size:.98rem;">
+      Venta y ceremonia de firma completa &middot; Incorporación de Adherentes &middot;
+      Solicitud de Cambio de Plan &middot; Anexo de Vigencia Inmediata &middot;
+      Plan Materno &middot; Titular Persona Jurídica &middot; Generación de Comisiones
+    </div>
+    <div class="meta">
+      <strong>Versión 2</strong> &middot; Septiembre 2026<br><br>
+      Este manual está escrito para que usted <strong>repita cada caso con sus propias
+      manos</strong>. Cada caso trae precondición, datos concretos, pasos numerados y el
+      resultado que debe ver. Incluye <strong>casos positivos</strong> (lo que tiene que
+      funcionar) y <strong>casos negativos</strong> (lo que el sistema tiene que impedir).<br><br>
+      Todo lo que se muestra fue ejecutado de punta a punta en el <strong>entorno de
+      PRUEBA</strong> (base US test <code>ykducvvcjzdpoojxlsig</code>).
+      Ningún dato de este manual proviene de producción.
+    </div>
+  </section>
+
+  <!-- ============ ÍNDICE ============ -->
+  <section class="cap toc">
+    <h2>Índice</h2>
+    <ol>
+      <li><a href="#preparar">Antes de empezar — preparar el entorno de prueba</a></li>
+      <li><a href="#que-agrega">¿Qué agrega Entrega A?</a></li>
+      <li><a href="#venta">Caso maestro: una venta de punta a punta</a></li>
+      <li><a href="#firma">La ceremonia de firma</a></li>
+      <li><a href="#incorporacion">Anexo de Incorporación de Adherente</a></li>
+      <li><a href="#cambio-plan">Solicitud de Cambio de Plan</a></li>
+      <li><a href="#comisiones">Generación de Comisiones</a></li>
+      <li><a href="#documentos">Documentos generados y el contrato final</a></li>
+      <li><a href="#otros">Vigencia Inmediata, Plan Materno y titular empresa</a></li>
+      <li><a href="#negativos">Casos negativos — lo que el sistema debe impedir</a></li>
+      <li><a href="#activacion">Anexo técnico — la cadena de activación automática</a></li>
+    </ol>
+  </section>
+
+  <!-- ============ 1. PREPARAR ============ -->
+  <section class="cap" id="preparar">
+    <h2>1. Antes de empezar — preparar el entorno de prueba</h2>
+
+    <p>Todos los casos de este manual se hacen contra la <strong>base de prueba</strong>,
+    nunca contra producción. Las pruebas crean ventas, documentos y firmas reales en esa
+    base: son datos descartables, pero quedan.</p>
+
+    <h3>1.1 Cómo se accede</h3>
+    <table>
+      <tr><th>Dirección</th><td><code>http://localhost:8080</code> (aplicación levantada en local contra la base de prueba)</td></tr>
+      <tr><th>Base</th><td>US test — <code>ykducvvcjzdpoojxlsig</code></td></tr>
+    </table>
+
+    <h3>1.2 Con qué usuario entrar</h3>
+    <p>Según lo que quiera probar, conviene entrar con un rol u otro. El flujo completo
+    (cargar, auditar, aprobar y liquidar) lo puede hacer un <code>super_admin</code> solo.</p>
+    <table>
+      <tr><th>Usuario</th><th>Rol</th><th>Para qué sirve en este manual</th></tr>
+      <tr><td><code>cacosta.ma@gmail.com</code></td><td>super_admin</td><td>Hace todo. Es el usuario con el que se ejecutaron estos casos.</td></tr>
+      <tr><td><code>vendedor1.samap@samap.com.py</code><br><small>Rossana Palacios</small></td><td>vendedor</td><td>Cargar ventas y ver cómo se ve el sistema con permisos reducidos.</td></tr>
+      <tr><td><code>auditor@saap.com.py</code></td><td>auditor</td><td>Aprobar o rechazar ventas desde el Panel de Auditoría.</td></tr>
+      <tr><td><code>eder.arguello@samap.com.py</code></td><td>admin</td><td>Es además el firmante de la <strong>CONTRATADA</strong>.</td></tr>
+    </table>
+
+    <div class="alerta">
+      <strong>En el entorno de prueba NO se envía WhatsApp.</strong> Los botones
+      <em>Enviar por WhatsApp</em> están, pero el mensaje no llega a ningún teléfono.
+      Para firmar, use <strong>Copiar Enlace</strong> en la pantalla <em>Flujo de Firma</em>
+      y péguelo en el navegador. Esto es una limitación del entorno de prueba, no del sistema.
+    </div>
+
+    <div class="nota">
+      <strong>Tampoco pide código OTP.</strong> En la empresa de prueba la política
+      <em>«exigir OTP para firmar»</em> está desactivada, así que el firmante pasa directo
+      del consentimiento a la firma. En producción, según cómo esté configurada la empresa,
+      puede aparecer un paso extra de código de verificación.
+    </div>
+
+    <h3>1.3 Cómo leer cada caso</h3>
+    <p>Cada caso tiene la misma forma. <span class="chip pos">POSITIVO</span> significa que
+    la acción <em>debe</em> completarse; <span class="chip neg">NEGATIVO</span> significa que
+    el sistema <em>debe</em> frenarla. Un caso negativo que "pasa" es un bug.</p>
+    <table>
+      <tr><th>Precondición</th><td>El estado en el que tiene que estar el sistema antes de arrancar.</td></tr>
+      <tr><th>Datos</th><td>Los valores exactos que se cargaron. Puede usar otros, pero si copia estos las capturas le van a coincidir.</td></tr>
+      <tr><th>Pasos</th><td>Qué hacer, en orden.</td></tr>
+      <tr><th>Resultado esperado</th><td>Qué tiene que ver al terminar. Es el criterio de aprobación del caso.</td></tr>
+    </table>
+
+    <div class="ojo">
+      <strong>Los avisos duran pocos segundos.</strong> Los mensajes de error y de éxito
+      aparecen como un cartelito abajo a la derecha y se van solos en 3–4 segundos. Si está
+      probando un caso negativo, mire esa esquina apenas hace clic.
+    </div>
+
+    <figure>
+      <div class="shot"><img src="capturas/00-dashboard.jpg" alt="Dashboard"></div>
+      <figcaption>Pantalla de inicio. El menú de la izquierda es el mismo en todo el manual:
+      <em>Ventas</em>, <em>Documentos</em>, <em>Flujo de Firmas</em>, <em>Auditoría</em> y
+      <em>Comisiones</em> son los cinco que va a usar.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 2. QUÉ AGREGA ============ -->
+  <section class="cap" id="que-agrega">
+    <h2>2. ¿Qué agrega Entrega A?</h2>
+
+    <p>Hasta ahora el sistema sabía hacer <strong>ventas nuevas</strong>: un titular, sus
+    adherentes, un plan y una ceremonia de firma. Entrega A agrega tres cosas.</p>
+
+    <h3>a) Operaciones sobre un contrato que <em>ya está firmado</em></h3>
+    <p>Un contrato firmado no se puede editar — si se editara, la base diría una cosa y el
+    PDF firmado otra. Entonces, para cambiar algo, se emite un <strong>anexo</strong>: un
+    documento nuevo que se firma aparte y que recién al quedar firmado modifica el contrato
+    original.</p>
+    <table>
+      <tr><th>Quiero…</th><th>Se hace con…</th><th>Dónde está</th></tr>
+      <tr><td>Sumar un adherente a un contrato firmado</td><td>Anexo de Incorporación de Adherente</td><td>Pestaña <em>Incorporaciones</em> de la venta</td></tr>
+      <tr><td>Cambiar el plan y los montos de un contrato firmado</td><td>Solicitud de Cambio de Plan</td><td>Pestaña <em>Cambio de Plan</em> de la venta</td></tr>
+      <tr><td>Dejar constancia de cobertura inmediata</td><td>Anexo Especial de Vigencia Inmediata</td><td>Se adjunta como plantilla a cualquier venta</td></tr>
+    </table>
+
+    <figure>
+      <div class="shot"><img src="capturas/72-plantillas-tipos-venta.jpg" alt="Plantillas de los tipos de venta"></div>
+      <figcaption>Las tres plantillas de Entrega A en el módulo <em>Templates</em>. Están
+      cargadas de fábrica: no hay que crearlas.</figcaption>
+    </figure>
+
+    <div class="nota">
+      Las pestañas <em>Incorporaciones</em> y <em>Cambio de Plan</em>
+      <strong>sólo aparecen cuando el contrato está firmado</strong>. Si no las ve, la venta
+      todavía no llegó a ese estado — no es un error.
+    </div>
+
+    <h3>b) Captura de datos ampliada en la venta</h3>
+    <ul>
+      <li><strong>Vigencia Inmediata (V.I.)</strong>, a nivel de la venta y también adherente por adherente.</li>
+      <li><strong>Fecha de ingreso</strong> por adherente.</li>
+      <li><strong>Plan Materno</strong> como adicional que se contrata junto al plan principal.</li>
+      <li><strong>Titular persona jurídica</strong> (empresa con razón social y R.U.C.).</li>
+    </ul>
+
+    <h3>c) Generación de comisiones</h3>
+    <p>Un módulo que calcula y liquida la comisión del vendedor por período, con reglas por
+    plan, por vendedor y por tipo de venta. Las operaciones (anexos) también comisionan.</p>
+  </section>
+
+  <!-- ============ 3. CASO MAESTRO ============ -->
+  <section class="cap" id="venta">
+    <h2>3. Caso maestro: una venta de punta a punta</h2>
+
+    <p>Éste es el caso más importante del manual: recorre el ciclo completo, desde cargar la
+    venta hasta tener el contrato firmado. Todos los capítulos que siguen se apoyan en él.</p>
+
+    <div class="nota">
+      <strong>El recorrido completo es:</strong> cargar la venta → cargar adherentes →
+      enviar a auditoría → aprobar → adjuntar plantillas → enviar documentos a firma →
+      firma el titular → firman los adherentes → firma la contratada → contrato firmado.
+    </div>
+
+    <div class="caso">
+      <h4><span class="id">CP-01</span> Cargar una venta nueva <span class="chip pos">POSITIVO</span></h4>
+      <p><strong>Precondición:</strong> estar logueado con un usuario que pueda cargar ventas.</p>
+      <table class="datos">
+        <tr><th>Cliente</th><td>Camila Sosa Schramm — C.I. 4856203 (ya existe en la base de prueba)</td></tr>
+        <tr><th>Plan</th><td>Senior Plus</td></tr>
+        <tr><th>Requiere adherentes</th><td>Sí (tildado)</td></tr>
+        <tr><th>Vigencia Inmediata</th><td>No</td></tr>
+        <tr><th>Tipo de Venta</th><td>Venta Nueva</td></tr>
+        <tr><th>Monto Titular / Plan</th><td>460.000</td></tr>
+      </table>
+      <ol>
+        <li>Menú <strong>Ventas</strong> → botón <strong>Nueva venta</strong>.</li>
+        <li>En <em>Cliente</em>, elegir el cliente. Si no existe, el botón <strong>+</strong> al lado abre el alta de cliente.</li>
+        <li>Elegir el <em>Plan</em>.</li>
+        <li>Tildar <em>¿Requiere adherentes/grupo familiar?</em>.</li>
+        <li>Cargar el <em>Monto Titular / Plan</em>.</li>
+        <li><strong>Crear Venta</strong>.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/11-nueva-venta-basico.jpg" alt="Formulario de nueva venta"></div>
+        <figcaption>Pestaña <em>Básico</em> completa. Fíjese en <em>Vigencia Inmediata (V.I.)</em>
+        y <em>Tipo de Venta</em>: son campos de Entrega A.</figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> la pantalla pasa a <em>Editar Venta</em> y arriba
+        aparece el número de contrato asignado (en la prueba: <code>2026-000027</code>).
+        Aparecen las pestañas <em>Adherentes</em>, <em>Documentos</em>, <em>DDJJ Salud</em>,
+        <em>Templates</em> y <em>Auditoría</em>.
+      </div>
+    </div>
+
+    <div class="caso">
+      <h4><span class="id">CP-02</span> Cargar un adherente con Vigencia Inmediata <span class="chip pos">POSITIVO</span></h4>
+      <p><strong>Precondición:</strong> venta creada (CP-01), todavía sin firmar.</p>
+      <table class="datos">
+        <tr><th>Nombre y Apellido</th><td>Lucia Sosa Schramm</td></tr>
+        <tr><th>C.I.</th><td>5123456</td></tr>
+        <tr><th>Parentesco</th><td>Hijo/a</td></tr>
+        <tr><th>Fecha de Nacimiento</th><td>15/03/2010</td></tr>
+        <tr><th>Género</th><td>Femenino</td></tr>
+        <tr><th>Teléfono</th><td>981234567</td></tr>
+        <tr><th>Monto</th><td>150.000</td></tr>
+        <tr><th>Fecha de Ingreso</th><td>02/09/2026</td></tr>
+        <tr><th>Vigencia Inmediata</th><td><strong>Sí</strong></td></tr>
+      </table>
+      <ol>
+        <li>Pestaña <strong>Adherentes</strong> → <strong>Agregar</strong>.</li>
+        <li>Completar los datos de la tabla.</li>
+        <li><strong>Guardar Adherente</strong>.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/12-adherente-alta.jpg" alt="Alta de adherente"></div>
+        <figcaption>Alta de adherente. <em>Fecha de Ingreso</em> y <em>Vigencia Inmediata (V.I.)</em>
+        son los dos campos que agrega Entrega A. La V.I. del adherente puede diferir de la de
+        la venta: por eso la opción por defecto es <em>«Según la venta»</em>.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="capturas/13-adherente-guardado.jpg" alt="Adherente guardado"></div>
+        <figcaption>El adherente aparece en la lista con su C.I., parentesco, teléfono y monto.</figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> el contador dice <em>Adherentes (1)</em> y —esto
+        es lo importante— el <strong>total de la venta pasa a 610.000</strong>
+        (460.000 del titular + 150.000 del adherente). El total lo calcula la base, no la
+        pantalla: verifíquelo en la lista de <em>Ventas</em>, columna <em>MONTO</em>.
+      </div>
+      <figure>
+        <div class="shot"><img src="capturas/10-ventas-lista.jpg" alt="Listado de ventas"></div>
+        <figcaption>Listado de <em>Ventas</em>. La primera fila es la venta recién creada:
+        <code>2026-000027</code> · Senior Plus · Gs. 610.000 · <em>Pendiente</em> · 40% de
+        progreso. Ahí se verifica que el total quedó bien.</figcaption>
+      </figure>
+    </div>
+
+    <div class="caso">
+      <h4><span class="id">CP-03</span> Enviar a auditoría y aprobar <span class="chip pos">POSITIVO</span></h4>
+      <p><strong>Precondición:</strong> venta con cliente, plan y monto cargados.</p>
+      <ol>
+        <li>En la venta, botón <strong>Enviar a Auditoría</strong>. La pantalla vuelve al listado de Ventas y la venta queda en <em>Pendiente</em>.</li>
+        <li>Menú <strong>Auditoría</strong>. La venta aparece en <em>Ventas para Auditar</em>.</li>
+        <li><strong>Revisar</strong>. Se abre el detalle: datos del cliente, del plan, adherentes y la Declaración Jurada de Salud de cada uno.</li>
+        <li>Bajar hasta <em>Decisión de Auditoría</em> y presionar <strong>Aprobar Venta</strong>.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/14-panel-auditoria.jpg" alt="Panel de auditoría"></div>
+        <figcaption>Panel de Auditoría. Cada fila muestra cliente, plan, monto, número de
+        contrato y el vendedor que la cargó.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="capturas/15-detalle-auditoria.jpg" alt="Detalle de auditoría"></div>
+        <figcaption>Detalle. En <em>Información Adicional</em> el auditor ve
+        <em>Vigencia Inmediata</em> y <em>Tipo de Venta</em>; más abajo, los adherentes y las
+        respuestas de la DDJJ de salud.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="capturas/16-decision-auditoria.jpg" alt="Decisión de auditoría"></div>
+        <figcaption>Las tres salidas posibles: <strong>Aprobar Venta</strong>,
+        <strong>Solicitar Información</strong> o <strong>Rechazar</strong>. Las notas quedan
+        registradas.</figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> la venta desaparece de <em>Pendientes</em>, el
+        contador de <em>Aprobadas</em> sube en uno, y en la venta la pestaña
+        <strong>Templates</strong> deja de estar bloqueada.
+      </div>
+    </div>
+
+    <div class="caso">
+      <h4><span class="id">CP-04</span> Adjuntar plantillas y emitir los documentos <span class="chip pos">POSITIVO</span></h4>
+      <p><strong>Precondición:</strong> venta aprobada por auditoría (CP-03).</p>
+      <p>Hay que adjuntar <strong>tres</strong> plantillas, y las tres cumplen un papel distinto:</p>
+      <table>
+        <tr><th>Plantilla</th><th>Etiqueta</th><th>Para qué</th></tr>
+        <tr><td>CONTRATO DE PRESTACIÓN DE SERVICIOS DE SALUD</td><td>Contrato</td><td>Es <strong>el contrato</strong>. Es el que lleva el bloque de firmas y el que se sella al final.</td></tr>
+        <tr><td>Declaración Jurada de Salud</td><td>DDJJ</td><td>Genera una DDJJ para el titular y <strong>una por cada adherente</strong>.</td></tr>
+        <tr><td>Plan Senior <small>(o la del plan que corresponda)</small></td><td>Anexo</td><td>El anexo descriptivo del plan. Se adjunta al contrato, no se firma por separado.</td></tr>
+      </table>
+      <ol>
+        <li>Pestaña <strong>Templates</strong>.</li>
+        <li>En <em>Seleccionar template…</em> elegir una y presionar <strong>Agregar</strong>. Repetir para las tres.</li>
+        <li>Verificar el texto <em>«Documentos a enviar…»</em>: debe decir la cantidad correcta de adherentes.</li>
+        <li>Presionar <strong>Enviar Documentos para Firma</strong> <em>una sola vez</em> y esperar. Tarda unos segundos.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/17-templates-vacio.jpg" alt="Pestaña Templates desbloqueada"></div>
+        <figcaption>Pestaña <em>Templates</em> ya desbloqueada, todavía sin plantillas:
+        <em>«No hay templates asociados. Seleccione templates (DDJJ Salud, Contrato, Anexos)
+        para generar documentos de firma.»</em></figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="capturas/18-templates-asociados.jpg" alt="Plantillas asociadas"></div>
+        <figcaption>Las tres plantillas asociadas, con su etiqueta <em>Anexo</em>, <em>DDJJ</em> y
+        <em>Contrato</em>. Abajo, el resumen de lo que se va a generar.</figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> la aplicación navega sola a
+        <strong>Flujo de Firma</strong>. En la base quedan 4 documentos (contrato, DDJJ del
+        titular, DDJJ del adherente y el anexo del plan) y 2 enlaces de firma pendientes
+        (titular y adherente).
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4. FIRMA ============ -->
+  <section class="cap" id="firma">
+    <h2>4. La ceremonia de firma</h2>
+
+    <p>La firma tiene <strong>dos pasos</strong>. Primero firman todos los del paso 1
+    (titular y adherentes). Cuando el último del paso 1 termina, el sistema
+    <strong>activa solo</strong> el enlace de la contratada (paso 2). Nadie tiene que
+    apretar nada para que eso pase.</p>
+
+    <figure>
+      <div class="shot"><img src="capturas/19-flujo-firma.jpg" alt="Flujo de firma"></div>
+      <figcaption>Pantalla <em>Flujo de Firma</em>. Tres bloques: <strong>Firma del
+      Titular</strong>, <strong>Firmas de Adherentes</strong> y <strong>Firma de la
+      Contratada</strong>. La contratada arranca en (0) con el aviso <em>«El link de firma de
+      la contratada se genera automáticamente cuando el titular complete su firma»</em>.</figcaption>
+    </figure>
+
+    <div class="caso">
+      <h4><span class="id">CP-05</span> Firmar como titular <span class="chip pos">POSITIVO</span></h4>
+      <p><strong>Precondición:</strong> documentos enviados a firma (CP-04).</p>
+      <ol>
+        <li>En <em>Firma del Titular</em>, presionar <strong>Copiar Enlace</strong>
+            (recuerde: en prueba el WhatsApp no sale).</li>
+        <li>Pegar el enlace en el navegador. Se abre la vista pública del firmante.</li>
+        <li><strong>Paso 1:</strong> revisar los documentos con el botón <em>Ver</em>. El titular
+            recibe el contrato, su DDJJ y los anexos informativos.</li>
+        <li><strong>Paso 2 — Consentimiento Legal:</strong> tildar
+            <em>«He leído y acepto las declaraciones anteriores…»</em> y presionar
+            <strong>Confirmar Consentimiento</strong>.</li>
+        <li><strong>Paso 3:</strong> revisar el resumen de evidencias y presionar
+            <strong>Firmar Todos los Documentos</strong>. Si aparece un recuadro blanco para
+            firmar, dibuje la firma con el mouse antes (ver CP-09).</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/20-firmar-titular.jpg" alt="Vista del firmante titular"></div>
+        <figcaption>Vista pública del titular: datos del contrato, plan y monto, los
+        documentos a firmar y los anexos marcados <em>Sólo lectura</em>.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="capturas/21-consentimiento-legal.jpg" alt="Consentimiento legal"></div>
+        <figcaption>Consentimiento legal, con la referencia a la Ley N° 4017/2010.
+        Sin este paso no se habilita la firma.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="capturas/22-evidencias-y-firma.jpg" alt="Resumen de evidencias"></div>
+        <figcaption><em>Paso 3 — Resumen de Evidencias</em>: IP, fecha y hora, identidad y
+        hash del documento. Al firmar se arma un paquete de evidencia inmutable.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="capturas/23-firma-titular-ok.jpg" alt="Documento firmado"></div>
+        <figcaption>Confirmación: <em>«¡Documento firmado exitosamente!»</em> con la fecha y
+        hora, y los PDF firmados disponibles para descargar.</figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> el enlace queda <em>Firmado</em> y los documentos
+        del titular pasan a <em>(Firmado)</em> con su PDF sellado. En <em>Flujo de Firma</em>
+        el card del titular cambia a verde y ofrece <strong>Descargar Documento Firmado</strong>.
+      </div>
+    </div>
+
+    <div class="caso">
+      <h4><span class="id">CP-06</span> Firmar como adherente <span class="chip pos">POSITIVO</span></h4>
+      <p><strong>Precondición:</strong> CP-05 hecho (aunque el orden entre titular y
+      adherentes no importa: los dos son paso 1).</p>
+      <ol>
+        <li>En <em>Firmas de Adherentes</em>, <strong>Copiar Enlace</strong> del adherente.</li>
+        <li>Abrirlo y repetir consentimiento + firma.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/24-firmar-adherente.jpg" alt="Vista del firmante adherente"></div>
+        <figcaption>El adherente ve <strong>solamente su DDJJ de Salud</strong>, no el contrato.
+        El encabezado lo dice: <em>«DDJJ de Salud - Adherente»</em>.</figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> al completarse el último firmante del paso 1, el
+        bloque <em>Firma de la Contratada</em> pasa de <strong>(0)</strong> a <strong>(1)</strong>
+        con un enlace <em>Pendiente</em>, <strong>sin que nadie lo haya generado a mano</strong>.
+      </div>
+      <figure>
+        <div class="shot"><img src="capturas/25-flujo-contratada-activada.jpg" alt="Contratada activada"></div>
+        <figcaption>Titular y adherente firmados; el enlace de la contratada
+        (Eder Arguello) apareció solo.</figcaption>
+      </figure>
+    </div>
+
+    <div class="caso">
+      <h4><span class="id">CP-07</span> Firmar como contratada y cerrar la venta <span class="chip pos">POSITIVO</span></h4>
+      <p><strong>Precondición:</strong> todos los firmantes del paso 1 completados.</p>
+      <ol>
+        <li>En <em>Firma de la Contratada</em>, <strong>Copiar Enlace</strong> y abrirlo.</li>
+        <li>Consentimiento + <strong>Firmar Todos los Documentos</strong>.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/26-firmar-contratada.jpg" alt="Vista de la contratada"></div>
+        <figcaption>La contratada firma <strong>únicamente el contrato</strong>
+        (<em>«Firma del Contrato - Contratada»</em>), en representación de la empresa.</figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> la venta pasa a <strong>completado</strong> y
+        quedan <strong>4 documentos con PDF firmado</strong>. Recién ahora el contrato final
+        existe: es el único momento en que se genera, porque necesita incluir el bloque de
+        firma de la contratada.
+      </div>
+      <figure>
+        <div class="shot"><img src="capturas/27-flujo-completo.jpg" alt="Flujo completo"></div>
+        <figcaption>Los tres bloques en verde. Ésta es la foto de una venta terminada.</figcaption>
+      </figure>
+      <div class="nota">
+        En producción, al firmar la contratada se dispara <strong>automáticamente</strong> un
+        WhatsApp al titular con el link de descarga del contrato completo (válido 7 días).
+        En prueba ese envío no ocurre; el resto del proceso es idéntico.
+      </div>
+    </div>
+
+    <div class="caso neg">
+      <h4><span class="id">CP-08</span> Abrir el enlace de la contratada antes de tiempo <span class="chip neg">NEGATIVO</span></h4>
+      <p><strong>Precondición:</strong> el titular todavía no firmó.</p>
+      <ol><li>Intentar abrir el enlace de la contratada.</li></ol>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong> la página muestra
+        <strong>«Enlace aún no disponible»</strong>. La firma es secuencial y el paso 2 no se
+        puede adelantar. Si lograra firmar, sería un bug grave: el contrato se sellaría sin la
+        firma del cliente.
+      </div>
+    </div>
+
+    <div class="caso neg">
+      <h4><span class="id">CP-09</span> Firmar sin trazar la firma <span class="chip neg">NEGATIVO</span></h4>
+      <p><strong>Precondición:</strong> un firmante que todavía no tenga firma electrónica
+      registrada — se le muestra el recuadro <em>Firma Digital</em>.</p>
+      <ol>
+        <li>Aceptar el consentimiento y bajar hasta <em>Firma Digital</em>.</li>
+        <li><strong>Sin dibujar nada</strong>, intentar presionar <em>Firmar Todos los Documentos</em>.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/94-neg-firma-sin-trazo.jpg" alt="Firma sin trazo"></div>
+        <figcaption>Recuadro vacío: el botón <em>Firmar Todos los Documentos</em> está apagado
+        y no responde.</figcaption>
+      </figure>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong> el botón está <strong>deshabilitado</strong>.
+        Recién se habilita después del primer trazo.
+      </div>
+      <figure>
+        <div class="shot"><img src="capturas/42-firma-trazada.jpg" alt="Firma trazada"></div>
+        <figcaption>Con la firma dibujada, el botón se habilita. Los botones
+        <em>Deshacer</em> y <em>Limpiar</em> permiten corregir el trazo.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ 5. INCORPORACIÓN ============ -->
+  <section class="cap" id="incorporacion">
+    <h2>5. Anexo de Incorporación de Adherente</h2>
+
+    <p>Es el formulario para <strong>sumar una persona a un contrato que ya está firmado</strong>.
+    No modifica el contrato original: genera una <em>venta-operación</em> aparte
+    (numerada <code>ANX-…</code>) que se firma por su cuenta. El adherente entra al contrato
+    madre recién cuando ese anexo queda firmado.</p>
+
+    <div class="alerta">
+      <strong>Esto es lo que hay que entender del módulo.</strong> Mientras el anexo no esté
+      firmado, el contrato madre <em>no cambia</em>: sigue con los mismos adherentes y el
+      mismo total. Si mira el contrato madre en el medio del proceso y no ve al adherente
+      nuevo, está funcionando bien.
+    </div>
+
+    <div class="caso">
+      <h4><span class="id">CP-10</span> Crear la incorporación <span class="chip pos">POSITIVO</span></h4>
+      <p><strong>Precondición:</strong> un contrato <strong>firmado</strong> (el de CP-07).</p>
+      <table class="datos">
+        <tr><th>Nombre y Apellido</th><td>Mateo Sosa Schramm</td></tr>
+        <tr><th>C.I.</th><td>6789012</td></tr>
+        <tr><th>Fecha Nac.</th><td>20/07/2015</td></tr>
+        <tr><th>Parentesco</th><td>Hijo/a</td></tr>
+        <tr><th>Fecha de Ingreso</th><td>02/09/2026</td></tr>
+        <tr><th>Precio</th><td>120.000</td></tr>
+        <tr><th>Teléfono</th><td>981555444</td></tr>
+      </table>
+      <ol>
+        <li>Abrir la venta firmada → pestaña <strong>Incorporaciones</strong>.</li>
+        <li><strong>Incorporar Adherente</strong>.</li>
+        <li>Completar los datos. <em>Agregar otra persona</em> permite sumar varias en el mismo anexo.</li>
+        <li><strong>Crear Incorporación</strong>.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/30-incorporaciones-vacio.jpg" alt="Pestaña Incorporaciones"></div>
+        <figcaption>Pestaña <em>Incorporaciones</em> antes de empezar. Aparece sólo en
+        contratos firmados.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="capturas/31-incorporacion-form.jpg" alt="Formulario de incorporación"></div>
+        <figcaption>El aviso lo dice explícito: <em>«El contrato original no se modifica: los
+        adherentes se suman recién cuando el anexo queda firmado.»</em></figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> el sistema crea una venta-operación
+        <code>ANX-2026-0000xx</code> con tipo <em>alta_adherente</em>, monto igual a la suma de
+        los adherentes incorporados (120.000) y estado de auditoría
+        <em>aprobado_para_templates</em> — no hay que volver a auditarla, porque el contrato
+        madre ya pasó auditoría. La pantalla salta directo a esa venta-operación.
+      </div>
+    </div>
+
+    <div class="caso">
+      <h4><span class="id">CP-11</span> Emitir y firmar el anexo <span class="chip pos">POSITIVO</span></h4>
+      <p><strong>Precondición:</strong> incorporación creada (CP-10).</p>
+      <ol>
+        <li>En la venta-operación, pestaña <strong>Templates</strong>.</li>
+        <li>Agregar <strong>Anexo de Incorporación de Adherente</strong> — aparece marcada
+            <em>Recomendada</em>— y también <strong>Declaración Jurada de Salud</strong>
+            (el adherente nuevo necesita la suya).</li>
+        <li><strong>Enviar Documentos para Firma</strong>.</li>
+        <li>Firmar con el titular y con el adherente nuevo, igual que en CP-05 y CP-06.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/32-anexo-template.jpg" alt="Plantilla del anexo"></div>
+        <figcaption>La plantilla trae su propia descripción: <em>«Anexo por el cual el
+        contratante incorpora adherentes a un contrato ya firmado.»</em></figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="capturas/33-anexo-firmado.jpg" alt="Anexo firmado"></div>
+        <figcaption>Anexo firmado. En este caso la firma de la contratada quedó registrada
+        directamente: <em>«Venta completada. Firma de la contratada registrada.»</em></figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> la venta-operación queda <strong>completado</strong>.
+      </div>
+    </div>
+
+    <div class="caso">
+      <h4><span class="id">CP-12</span> Verificar que el contrato madre se actualizó solo <span class="chip pos">POSITIVO</span></h4>
+      <p><strong>Precondición:</strong> anexo completado (CP-11). <strong>No hay que apretar
+      ningún botón</strong>: la actualización la hace la base.</p>
+      <ol>
+        <li>Volver a la venta original (<code>2026-000027</code>) → pestaña <strong>Adherentes</strong>.</li>
+        <li>Mirar el total de la venta en el listado de <em>Ventas</em>.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/34-contrato-madre-actualizado.jpg" alt="Contrato madre actualizado"></div>
+        <figcaption><em>Adherentes (2)</em>: Mateo se sumó al contrato firmado sin tocarlo a mano.</figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> el contrato madre pasa de 1 a
+        <strong>2 adherentes</strong> y su total de <strong>610.000 a 730.000</strong>
+        (610.000 + 120.000). Éste es el corazón del módulo: si el total no se recalcula,
+        el caso falla.
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 6. CAMBIO DE PLAN ============ -->
+  <section class="cap" id="cambio-plan">
+    <h2>6. Solicitud de Cambio de Plan</h2>
+
+    <p>Mismo mecanismo que la incorporación, pero para cambiar el plan y los montos de todo el
+    grupo. Genera una venta-operación <code>CMB-…</code>.</p>
+
+    <div class="caso">
+      <h4><span class="id">CP-13</span> Crear la solicitud de cambio de plan <span class="chip pos">POSITIVO</span></h4>
+      <p><strong>Precondición:</strong> contrato firmado, con el adherente de CP-12 ya incorporado
+      (plan Senior Plus, total 730.000).</p>
+      <table class="datos">
+        <tr><th>Motivo</th><td>Separación del contrato actual a uno independiente</td></tr>
+        <tr><th>Plan nuevo</th><td>Beta</td></tr>
+        <tr><th>Fecha de inicio nvo. Cto.</th><td>01/10/2026</td></tr>
+        <tr><th>Camila (titular)</th><td>460.000 → <strong>350.000</strong></td></tr>
+        <tr><th>Mateo</th><td>120.000 → <strong>100.000</strong></td></tr>
+        <tr><th>Lucia</th><td>150.000 → <strong>120.000</strong></td></tr>
+      </table>
+      <ol>
+        <li>Venta firmada → pestaña <strong>Cambio de Plan</strong> → <strong>Solicitar Cambio de Plan</strong>.</li>
+        <li>Elegir <em>Motivo del cambio</em> y <em>Plan nuevo</em>.</li>
+        <li>Cargar el <em>Monto nuevo</em> de cada integrante en la tabla.</li>
+        <li><strong>Crear Cambio de Plan</strong>.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/40-cambio-plan-form.jpg" alt="Formulario de cambio de plan"></div>
+        <figcaption>El formulario trae la <strong>foto del grupo tal como está hoy</strong>:
+        cada integrante con su plan y monto anterior. Abajo, la cuota mensual del grupo.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="capturas/41-cambio-plan-completo.jpg" alt="Cambio de plan completo"></div>
+        <figcaption>Con los montos nuevos cargados, la cuota del grupo se recalcula sola:
+        730.000 → 570.000. Ese total es la base de cálculo de la comisión de la operación.</figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> se crea la venta-operación
+        <code>CMB-2026-0000xx</code>, tipo <em>cambio_plan</em>, monto 570.000. El contrato
+        madre <strong>sigue en Senior Plus con 730.000</strong>.
+      </div>
+    </div>
+
+    <div class="caso">
+      <h4><span class="id">CP-14</span> Firmar el formulario y verificar la aplicación <span class="chip pos">POSITIVO</span></h4>
+      <ol>
+        <li>En la venta-operación → <strong>Templates</strong> → agregar
+            <strong>Formulario de Solicitud de Cambio de Plan</strong>.</li>
+        <li><strong>Enviar Documentos para Firma</strong> y firmar con el titular.</li>
+        <li>Volver a la venta original y mirar el plan y el monto.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/43-plan-aplicado.jpg" alt="Plan aplicado al contrato madre"></div>
+        <figcaption>El contrato madre <code>2026-000027</code> ahora dice
+        <strong>Beta</strong> y monto titular <strong>350.000</strong>.</figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> al quedar firmado el formulario, la base aplica al
+        contrato madre el <strong>plan Beta</strong>, la fecha de inicio y los montos nuevos de
+        cada integrante, y recalcula el total a <strong>570.000</strong>. Otra vez: nadie
+        apretó "aplicar".
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 7. COMISIONES ============ -->
+  <section class="cap" id="comisiones">
+    <h2>7. Generación de Comisiones</h2>
+
+    <p>Menú <strong>Comisiones</strong>. Cuatro pestañas: <em>Liquidaciones</em> (historial),
+    <em>Nueva liquidación</em> (calcular y generar), <em>Reglas</em> y <em>Configuración</em>.
+    Acceden <code>super_admin</code>, <code>admin</code>, <code>financiero</code>,
+    <code>supervisor</code> y <code>auditor</code>; generan y cierran los tres primeros.</p>
+
+    <h3>7.1 Las reglas — hay que mirarlas primero</h3>
+    <p>Antes de liquidar conviene entender de dónde sale el porcentaje. Hay dos niveles:</p>
+    <ul>
+      <li><strong>Vendedores que comisionan:</strong> quién está habilitado y su
+      <em>% por defecto</em>, que se aplica <strong>sólo</strong> a las ventas que ninguna
+      regla cubre.</li>
+      <li><strong>Reglas de comisión:</strong> la matriz fina — por plan, por vendedor, por
+      tipo de venta, con vigencia y prioridad. Si una regla aplica, manda la regla.</li>
+    </ul>
+    <figure>
+      <div class="shot"><img src="capturas/52-comisiones-reglas.jpg" alt="Reglas de comisión"></div>
+      <figcaption>Arriba los vendedores habilitados con su % por defecto y su base de cálculo;
+      abajo la matriz de reglas con alcance, cálculo, vigencia, prioridad y estado.</figcaption>
+    </figure>
+
+    <div class="caso">
+      <h4><span class="id">CP-15</span> Calcular una liquidación <span class="chip pos">POSITIVO</span></h4>
+      <ol>
+        <li>Pestaña <strong>Nueva liquidación</strong>.</li>
+        <li>Elegir <em>Vendedor</em>, <em>Desde</em> y <em>Hasta</em>.</li>
+        <li><strong>Calcular</strong>.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/51-comisiones-calculo.jpg" alt="Cálculo de comisiones"></div>
+        <figcaption>Vista previa: una fila por venta con Fecha, Cliente, Plan, Tipo de venta,
+        Regla aplicada, Base y Comisión. <strong>No escribe nada en la base</strong> — es una
+        simulación.</figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> aparece la tabla con el <em>Total estimado</em>.
+        Las filas resueltas muestran el % aplicado; las que no tienen regla salen en rojo.
+      </div>
+    </div>
+
+    <div class="caso neg">
+      <h4><span class="id">CP-16</span> Generar con ventas sin regla <span class="chip neg">NEGATIVO</span></h4>
+      <p><strong>Precondición:</strong> un período que incluya alguna venta cuyo plan no esté
+      cubierto por ninguna regla.</p>
+      <figure>
+        <div class="shot"><img src="capturas/96-neg-sin-regla.jpg" alt="Ventas sin regla"></div>
+        <figcaption>Aviso rojo <em>«Hay N venta(s) sin regla»</em> con las tres causas
+        frecuentes explicadas, filas marcadas <em>Sin regla</em> y
+        <strong>Generar borrador</strong> deshabilitado.</figcaption>
+      </figure>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong> el sistema <strong>no genera nada</strong> y avisa
+        <em>«No se asignará 0% automáticamente»</em>.
+        <br><strong>Qué significa:</strong> es a propósito. Prefiere frenar antes que liquidar
+        al 0% una venta que en realidad comisionaba. Hay que cargar la regla que falta y volver
+        a calcular. El propio aviso lista las tres causas típicas: la regla empieza después de
+        la venta, la regla está atada a otro vendedor o plan, o el vendedor no tiene % por defecto.
+      </div>
+    </div>
+
+    <div class="caso neg">
+      <h4><span class="id">CP-17</span> Fechas invertidas <span class="chip neg">NEGATIVO</span></h4>
+      <ol><li>Poner <em>Desde</em> 30/09/2026 y <em>Hasta</em> 01/09/2026.</li></ol>
+      <figure>
+        <div class="shot"><img src="capturas/95-neg-fechas-invertidas.jpg" alt="Fechas invertidas"></div>
+        <figcaption>Mensaje en rojo bajo los campos y botón <em>Calcular</em> apagado.</figcaption>
+      </figure>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong>
+        <em>«La fecha desde no puede ser posterior a la fecha hasta.»</em> y
+        <strong>Calcular</strong> deshabilitado.
+      </div>
+    </div>
+
+    <div class="caso">
+      <h4><span class="id">CP-18</span> Revisar una liquidación cerrada <span class="chip pos">POSITIVO</span></h4>
+      <ol>
+        <li>Pestaña <strong>Liquidaciones</strong> → <strong>Ver detalle</strong>.</li>
+      </ol>
+      <figure>
+        <div class="shot"><img src="capturas/50-comisiones-liquidaciones.jpg" alt="Listado de liquidaciones"></div>
+        <figcaption>Historial: número, promotor, período, estado y total.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="capturas/53-liquidacion-cerrada.jpg" alt="Liquidación cerrada"></div>
+        <figcaption>Detalle de una liquidación <em>cerrada</em>. El encabezado dice
+        <strong>«Detalle congelado»</strong>.</figcaption>
+      </figure>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> el detalle es inmutable — cada ítem guarda el %, la
+        base y la comisión tal como estaban al liquidar, aunque después cambien las reglas o los
+        montos de la venta. Las acciones disponibles son <em>Descargar PDF</em> y <em>Anular</em>;
+        <em>Cerrar liquidación</em> ya no aparece porque el período no está en borrador.
+      </div>
+    </div>
+
+    <div class="ojo">
+      <strong>Cuidado con quién cargó la venta.</strong> Sólo se liquidan las ventas de
+      vendedores <em>habilitados</em> en <em>Vendedores que comisionan</em>. Si carga una venta
+      con un usuario administrativo, no va a aparecer en ninguna liquidación — no es un bug.
+    </div>
+  </section>
+
+  <!-- ============ 8. DOCUMENTOS ============ -->
+  <section class="cap" id="documentos">
+    <h2>8. Documentos generados y el contrato final</h2>
+
+    <p>Menú <strong>Documentos</strong>. Los documentos se agrupan por venta; al expandir una
+    se ven todos, con su tipo y su estado.</p>
+
+    <figure>
+      <div class="shot"><img src="capturas/61-documentos-venta.jpg" alt="Documentos de una venta"></div>
+      <figcaption>Los 9 documentos de la venta del caso maestro después de todo el recorrido:
+      el contrato antes y después de firmar, las DDJJ del titular y de cada adherente, los
+      registros de firma de cada parte y el anexo del plan.</figcaption>
+    </figure>
+
+    <p>Al seleccionar uno, el panel derecho muestra el <strong>Generador de PDF</strong> con
+    <em>Vista Previa</em> y <em>Descargar PDF</em>, y debajo el contenido renderizado con los
+    campos dinámicos ya resueltos.</p>
+
+    <figure>
+      <div class="shot"><img src="capturas/60-documentos-lista.jpg" alt="Vista previa de documento"></div>
+      <figcaption>Vista previa del <em>Formulario de Solicitud de Cambio de Plan</em> firmado:
+      se ve el motivo, la tabla de integrantes con monto anterior y nuevo, la nueva cuota del
+      grupo y la firma trazada por el titular.</figcaption>
+    </figure>
+
+    <h3>8.1 Cómo se lee el contrato final</h3>
+    <p>Ésta es la última página del contrato ya firmado y sellado, tal como sale impreso.
+    Vale la pena leerla con detalle, porque cada dato marcado viene de un lugar distinto del
+    sistema:</p>
+
+    <figure>
+      <div class="shot full"><img src="capturas/90-contrato-final-pdf.png" alt="Última página del contrato final"></div>
+      <figcaption>Cierre del contrato: tabla de beneficiarios, vendedor, plan, datos de
+      facturación y el bloque de firmas de CONTRATANTE y CONTRATADA.</figcaption>
+    </figure>
+
+    <table>
+      <tr><th>Lo que se ve en el PDF</th><th>De dónde sale</th></tr>
+      <tr><td><strong>Tabla BENEFICIARIOS</strong> — N°, nombres, fecha nac., edad, C.I., sexo, cuota</td>
+          <td>Los adherentes cargados en la pestaña <em>Adherentes</em> de la venta. La edad se calcula sola a partir de la fecha de nacimiento.</td></tr>
+      <tr><td>Columna <strong>V.I.</strong></td>
+          <td>La <em>Vigencia Inmediata</em> de cada adherente. Es el campo de Entrega A que se carga en el alta del adherente; si quedó en <em>«Según la venta»</em>, hereda el valor de la venta.</td></tr>
+      <tr><td>Columna <strong>TIPO</strong></td>
+          <td>El <em>Tipo de Venta</em> (Venta Nueva, Reingreso…). Por eso el selector de tipo de venta importa: sale impreso en el contrato.</td></tr>
+      <tr><td><strong>TOTAL</strong> en letras y en números</td>
+          <td>El total de la venta, que calcula la base sumando el monto del titular y el de cada adherente. Es el mismo número que ve en la columna <em>MONTO</em> del listado de Ventas.</td></tr>
+      <tr><td><strong>Vendedor/a</strong></td>
+          <td>El vendedor asignado a la venta — el usuario que la cargó. Es también el que se usa para liquidar la comisión.</td></tr>
+      <tr><td><strong>Plan</strong></td>
+          <td>El plan elegido en la pestaña <em>Básico</em>. Si hubo un Cambio de Plan firmado, acá aparece el plan nuevo.</td></tr>
+      <tr><td><strong>DATOS DE FACTURACIÓN</strong> — Razón Social, R.U.C., correo, celular</td>
+          <td>El bloque <em>Datos de Facturación</em> de la pestaña <em>Básico</em>. Es lo que se usa cuando el titular factura a nombre de una empresa.</td></tr>
+      <tr><td><strong>Firmado electrónicamente por…</strong> con fecha y hora, en las dos columnas</td>
+          <td>Se escribe al sellar el PDF: el de la izquierda es el CONTRATANTE (el titular, cuando firmó); el de la derecha, la CONTRATADA (Eder Arguello, C.I. 3616083). Las dos marcas de tiempo forman parte del paquete de evidencia.</td></tr>
+    </table>
+
+    <div class="alerta">
+      <strong>Qué mirar al revisar un contrato final.</strong> Tienen que estar las
+      <strong>dos</strong> firmas. Si aparece sólo la de la CONTRATADA y falta la del cliente,
+      o si ve etiquetas HTML rotas en el texto, el documento está mal y hay que reportarlo.
+      También debe haber <strong>un solo</strong> contrato final por venta.
+    </div>
+  </section>
+
+  <!-- ============ 9. OTROS ============ -->
+  <section class="cap" id="otros">
+    <h2>9. Vigencia Inmediata, Plan Materno y titular empresa</h2>
+
+    <h3>9.1 Vigencia Inmediata (V.I.)</h3>
+    <p>La V.I. se define en dos lugares y el más específico gana.</p>
+    <figure>
+      <div class="shot"><img src="capturas/70-vi-nivel-venta.jpg" alt="V.I. a nivel de venta"></div>
+      <figcaption>A nivel de la venta, en la pestaña <em>Básico</em>: es el valor por defecto
+      para todo el grupo.</figcaption>
+    </figure>
+    <figure>
+      <div class="shot"><img src="capturas/71-vi-por-adherente.jpg" alt="V.I. por adherente"></div>
+      <figcaption>Por adherente, en su alta. La opción <em>«Según la venta»</em> hereda; <em>Sí</em> y
+      <em>No</em> pisan el valor de la venta para esa persona.</figcaption>
+    </figure>
+    <div class="caso">
+      <h4><span class="id">CP-19</span> Emitir el Anexo de Vigencia Inmediata <span class="chip pos">POSITIVO</span></h4>
+      <ol>
+        <li>Marcar V.I. = <em>Sí</em> en al menos un adherente.</li>
+        <li>En <strong>Templates</strong>, agregar <strong>Anexo Especial de Vigencia Inmediata</strong>.</li>
+        <li>Enviar documentos a firma.</li>
+      </ol>
+      <div class="esperado">
+        <strong>Resultado esperado:</strong> el anexo lista <strong>únicamente</strong> a los
+        integrantes con V.I. = Sí. Si nadie tiene V.I., la tabla sale vacía —señal de que la
+        plantilla se adjuntó de más.
+      </div>
+      <div class="nota">
+        La Vigencia Inmediata <strong>no es un tipo de venta</strong> y no tiene tabla propia:
+        es un anexo que se puede adjuntar a cualquier venta.
+      </div>
+    </div>
+
+    <h3>9.2 Plan Materno como adicional</h3>
+    <figure>
+      <div class="shot"><img src="capturas/73-plan-materno-check.jpg" alt="Plan Materno"></div>
+      <figcaption>Casilla <em>Incluye Plan Materno</em> en <em>Adicionales</em>. No reemplaza al
+      plan: se contrata junto al plan elegido.</figcaption>
+    </figure>
+    <figure>
+      <div class="shot"><img src="capturas/74-plan-materno-tab.jpg" alt="Pestaña Campos del Plan"></div>
+      <figcaption>Al marcarlo se habilita una pestaña nueva: <strong>Campos del Plan</strong>.</figcaption>
+    </figure>
+    <figure>
+      <div class="shot"><img src="capturas/75-campos-del-plan.jpg" alt="Campos del plan"></div>
+      <figcaption>Ahí se completan los datos que exige el Plan Materno.</figcaption>
+    </figure>
+    <div class="caso neg">
+      <h4><span class="id">CP-20</span> Enviar a auditoría con campos del Plan Materno vacíos <span class="chip neg">NEGATIVO</span></h4>
+      <ol>
+        <li>Tildar <em>Incluye Plan Materno</em> y dejar campos obligatorios sin completar.</li>
+        <li>Presionar <strong>Enviar a Auditoría</strong>.</li>
+      </ol>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong> aviso
+        <em>«Faltan campos obligatorios de Plan Materno: …»</em>, la aplicación lo lleva sola a la
+        pestaña <em>Campos del Plan</em> y esa pestaña queda marcada con un punto rojo.
+        La venta <strong>no</strong> avanza.
+      </div>
+    </div>
+
+    <h3>9.3 Titular persona jurídica (empresa)</h3>
+    <figure>
+      <div class="shot"><img src="capturas/76-clientes-lista.jpg" alt="Módulo Clientes"></div>
+      <figcaption>Módulo <em>Clientes</em>. Desde acá se da de alta al titular, sea persona
+      física o empresa; también se llega con el botón <strong>+</strong> del selector de
+      cliente en la venta.</figcaption>
+    </figure>
+    <figure>
+      <div class="shot"><img src="capturas/77-clientform-empresa.jpg" alt="Alta de cliente empresa"></div>
+      <figcaption>En el alta de cliente, tipo <em>Empresa</em>: se piden <em>Razón Social</em> y
+      <em>R.U.C.</em> en lugar de nombre y apellido.</figcaption>
+    </figure>
+    <figure>
+      <div class="shot"><img src="capturas/78-clientes-lista-empresa.jpg" alt="Listado de clientes"></div>
+      <figcaption>En el listado, el cliente empresa se muestra por su razón social.</figcaption>
+    </figure>
+    <div class="caso neg">
+      <h4><span class="id">CP-21</span> Guardar una empresa sin razón social <span class="chip neg">NEGATIVO</span></h4>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong> <em>«La razón social es requerida»</em> y no guarda.
+      </div>
+      <div class="ojo">
+        <strong>Ojo con el R.U.C.:</strong> hoy el campo <strong>no valida el formato</strong> —
+        acepta cualquier texto. No es un bug nuevo, es una validación que todavía no existe.
+        Cárguelo con cuidado, porque sale impreso en los datos de facturación del contrato.
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 10. NEGATIVOS ============ -->
+  <section class="cap" id="negativos">
+    <h2>10. Casos negativos — lo que el sistema debe impedir</h2>
+
+    <p>Estos casos son tan importantes como los positivos. Cada uno protege algo concreto: que
+    no se duplique un contrato, que no se edite un documento ya firmado, que no se liquide mal
+    una comisión. <strong>Si alguno de estos "pasa", hay que reportarlo.</strong></p>
+
+    <div class="caso neg">
+      <h4><span class="id">CP-22</span> Crear una venta con campos obligatorios vacíos <span class="chip neg">NEGATIVO</span></h4>
+      <figure>
+        <div class="shot"><img src="capturas/91-neg-venta-campos-obligatorios.jpg" alt="Campos obligatorios"></div>
+        <figcaption>Sin cliente, sin plan y con monto en 0: el campo se marca en rojo con
+        <em>«El monto debe ser mayor a 0»</em> y <strong>Crear Venta</strong> queda apagado.</figcaption>
+      </figure>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong> el botón no se habilita. Si además intenta cambiar
+        de pestaña, sale el aviso <em>«Debe seleccionar un cliente»</em> /
+        <em>«Debe seleccionar un plan»</em> y lo devuelve a <em>Básico</em>.
+      </div>
+    </div>
+
+    <div class="caso neg">
+      <h4><span class="id">CP-23</span> Adjuntar plantillas sin aprobar la auditoría <span class="chip neg">NEGATIVO</span></h4>
+      <p><strong>Precondición:</strong> venta en estado <em>Pendiente</em> de auditoría.</p>
+      <figure>
+        <div class="shot"><img src="capturas/92-neg-templates-sin-auditoria.jpg" alt="Templates bloqueado"></div>
+        <figcaption>Candado, <em>«Pendiente de Aprobación»</em> y el estado de auditoría a la vista.</figcaption>
+      </figure>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong> la pestaña <em>Templates</em> está bloqueada con el
+        texto <em>«La venta debe ser aprobada por auditoría antes de asociar templates para
+        firma.»</em>
+        <br><strong>Qué significa:</strong> no se puede mandar a firmar algo que nadie revisó.
+      </div>
+    </div>
+
+    <div class="caso neg">
+      <h4><span class="id">CP-24</span> Enviar documentos con un adherente sin DDJJ <span class="chip neg">NEGATIVO</span></h4>
+      <p><strong>Precondición:</strong> una venta con adherentes en la que se adjuntó el contrato
+      pero <strong>no</strong> la plantilla de Declaración Jurada de Salud.</p>
+      <figure>
+        <div class="shot"><img src="capturas/93-neg-adherente-sin-ddjj.jpg" alt="Sin plantilla DDJJ"></div>
+        <figcaption>Sólo el contrato adjunto. Al presionar <em>Enviar Documentos para Firma</em>
+        el aviso salta abajo a la derecha.</figcaption>
+      </figure>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong> aviso textual
+        <em>«Los siguientes adherentes no tienen documentos generados: {nombres}. Asegurate de
+        incluir un template de DDJJ para cada adherente antes de enviar.»</em>
+        y <strong>no se crea ningún documento ni enlace de firma</strong>.
+        <br><strong>Qué significa:</strong> la validación corre <em>antes</em> de tocar la base,
+        así que un envío fallido no deja la venta a medio armar.
+      </div>
+    </div>
+
+    <div class="caso neg">
+      <h4><span class="id">CP-25</span> Doble clic en «Enviar Documentos para Firma» <span class="chip neg">NEGATIVO</span></h4>
+      <ol><li>Presionar el botón dos veces seguidas, rápido.</li></ol>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong> el segundo clic se descarta y el botón se
+        deshabilita mientras procesa. Debe quedar <strong>un</strong> contrato,
+        <strong>una</strong> DDJJ por persona y <strong>un</strong> enlace por firmante.
+        <br><strong>Qué significa:</strong> es la protección contra contratos duplicados. Si
+        después de dos clics ve dos contratos en el módulo <em>Documentos</em>, repórtelo.
+      </div>
+    </div>
+
+    <div class="caso neg">
+      <h4><span class="id">CP-26</span> Modificar adherentes de un contrato firmado <span class="chip neg">NEGATIVO</span></h4>
+      <p><strong>Precondición:</strong> contrato <em>firmado</em> o <em>completado</em>.</p>
+      <ol><li>Pestaña <strong>Adherentes</strong> → intentar agregar, editar o borrar uno.</li></ol>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong> aviso
+        <em>«El contrato ya está firmado: los adherentes no se pueden modificar. Para sumar a
+        alguien usá una Incorporación de Adherente.»</em> y el adherente queda intacto.
+        <br><strong>Qué significa:</strong> el PDF firmado no se puede regenerar, así que si la
+        base cambiara, el papel diría otra cosa. <strong>No hay excepción por rol</strong>: ni
+        admin ni super_admin pueden. El camino correcto es el anexo del capítulo 5.
+      </div>
+      <div class="ojo">
+        En la pantalla <em>Editar Venta</em> los iconos de lápiz y papelera <strong>siguen
+        visibles</strong> aunque el contrato esté firmado. El bloqueo igual actúa al intentar
+        la acción — pero es esperable que el botón confunda. Vale reportarlo como detalle de
+        usabilidad.
+      </div>
+    </div>
+
+    <div class="caso neg">
+      <h4><span class="id">CP-27</span> Regenerar documentos de una venta ya cerrada <span class="chip neg">NEGATIVO</span></h4>
+      <p><strong>Precondición:</strong> venta con la contratada ya firmada.</p>
+      <ol><li>Intentar <strong>Regenerar Documentos</strong> desde la pestaña <em>Templates</em>.</li></ol>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong> error en pantalla del tipo
+        <em>«No se puede marcar como no-final el documento X: la contratada ya firmó esta venta
+        (venta cerrada)»</em>.
+        <br><strong>Qué significa:</strong> <strong>esto está bien.</strong> El error viene de la
+        base, no del navegador, y protege la evidencia de una firma real. Ver un error acá es el
+        comportamiento correcto, no una falla.
+      </div>
+    </div>
+
+    <div class="caso neg">
+      <h4><span class="id">CP-28</span> Abrir un enlace de firma vencido, revocado o ya usado <span class="chip neg">NEGATIVO</span></h4>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong>
+        <em>«Enlace no válido — El enlace de firma no es válido, ha expirado o ya fue utilizado.»</em>
+        <br><strong>Qué significa:</strong> si le pasa con un enlace que debería estar vigente,
+        genere uno nuevo con <strong>Reenviar</strong> desde <em>Flujo de Firma</em>.
+      </div>
+    </div>
+
+    <div class="caso neg">
+      <h4><span class="id">CP-29</span> Editar o cancelar un anexo ya enviado a firmar <span class="chip neg">NEGATIVO</span></h4>
+      <div class="esperado neg">
+        <strong>Resultado esperado:</strong> los botones <em>Editar</em> y <em>Cancelar</em>
+        desaparecen apenas la operación sale de <em>borrador</em>. Si insiste, el aviso es
+        <em>«La incorporación ya fue enviada a firmar y no se puede editar. Cancelala y creá una
+        nueva.»</em>; y si el anexo ya se activó,
+        <em>«La incorporación ya fue activada: el adherente está en el contrato. No se puede
+        cancelar.»</em>
+        <br><strong>Qué significa:</strong> editar un anexo que ya está firmándose dejaría el PDF
+        diciendo una cosa y la base otra.
+      </div>
+    </div>
+
+    <h3>10.1 Tabla de referencia rápida</h3>
+    <p>Otros mensajes con los que se puede topar y qué significan:</p>
+    <table>
+      <tr><th>Mensaje</th><th>Cuándo aparece</th></tr>
+      <tr><td><em>«Guarde la venta primero»</em></td><td>Abrió la pestaña Templates sin haber creado la venta.</td></tr>
+      <tr><td><em>«Debe tener cliente y plan asignados antes de enviar a auditoría»</em></td><td>Envío a auditoría con datos incompletos.</td></tr>
+      <tr><td><em>«Agregá al menos un adherente.»</em></td><td>Incorporación sin ninguna persona cargada.</td></tr>
+      <tr><td><em>«Elegí el plan nuevo.»</em></td><td>Cambio de plan sin plan destino.</td></tr>
+      <tr><td><em>«El cambio de plan ya fue aplicado al contrato. No se puede cancelar.»</em></td><td>Intento de cancelar una operación ya activada.</td></tr>
+      <tr><td><em>«Documentos regenerados. Se conservaron los enlaces de firma vigentes…»</em></td><td>Regeneró documentos y había enlaces todavía válidos: no se crean nuevos.</td></tr>
+      <tr><td><em>«No se encontró el contrato firmado por el titular…»</em></td><td>La contratada intentó firmar y el sistema no pudo ubicar el contrato del titular. <strong>Reportar</strong>: frena a propósito para no perder la firma del cliente.</td></tr>
+      <tr><td><em>«El prefijo de liquidación es obligatorio.»</em></td><td>Configuración de comisiones sin prefijo.</td></tr>
+    </table>
+  </section>
+
+  <!-- ============ 11. ANEXO TÉCNICO ============ -->
+  <section class="cap" id="activacion">
+    <h2>11. Anexo técnico — la cadena de activación automática</h2>
+
+    <p>En los capítulos 5 y 6 se repite la misma frase: <em>«nadie apretó aplicar»</em>. Vale la
+    pena explicar por qué, porque cambia la forma de probar.</p>
+
+    <p>Cuando se firma el último enlace de una venta-operación, se dispara una cadena
+    <strong>dentro de la base de datos</strong>:</p>
+
+    <table>
+      <tr><th>1</th><td>Se firma el último enlace → el enlace queda <code>completado</code>.</td></tr>
+      <tr><th>2</th><td>Un disparador lleva la venta-operación a <code>completado</code>.</td></tr>
+      <tr><th>3</th><td>Según el tipo: <strong>alta_adherente</strong> suma los adherentes al contrato madre; <strong>cambio_plan</strong> aplica plan, fecha y montos.</td></tr>
+      <tr><th>4</th><td>Se recalcula el total del contrato madre.</td></tr>
+    </table>
+
+    <div class="nota">
+      <strong>Por qué está en la base y no en la pantalla:</strong> la última firma puede ocurrir
+      un domingo a la noche, desde el celular del cliente, sin ningún navegador del sistema
+      abierto. Si la aplicación fuera la responsable de aplicar el anexo, ese anexo se quedaría
+      sin aplicar.
+    </div>
+
+    <div class="alerta">
+      <strong>Qué implica al probar:</strong> después de firmar el último enlace <strong>no hay
+      que hacer nada más</strong>. Si vuelve al contrato madre y no ve el cambio, primero
+      <strong>recargue la página</strong> — el navegador puede estar mostrando datos viejos. Si
+      después de recargar sigue igual, ahí sí es un problema y hay que reportarlo indicando el
+      número de la venta-operación (<code>ANX-…</code> o <code>CMB-…</code>).
+    </div>
+
+    <h3>11.1 Qué reportar cuando algo falla</h3>
+    <p>Para que un problema se pueda investigar, incluya siempre:</p>
+    <ul>
+      <li>El <strong>número de contrato</strong> (<code>2026-000027</code>, <code>ANX-…</code>, <code>CMB-…</code>).</li>
+      <li>El <strong>caso de este manual</strong> que estaba ejecutando (<code>CP-12</code>, etc.).</li>
+      <li>El <strong>mensaje textual</strong> que vio, o una captura de pantalla.</li>
+      <li>Con qué <strong>usuario</strong> estaba logueado.</li>
+      <li>Si el problema se repite al intentarlo de nuevo.</li>
+    </ul>
+  </section>
+
+</div>
+</body>
+</html>

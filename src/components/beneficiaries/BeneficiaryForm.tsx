@@ -8,19 +8,28 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import {
+  getRelationshipLabel,
+  isRelationshipRequired,
+  validateBeneficiary,
+  type BeneficiaryValidationContext,
+} from '@/lib/beneficiaryValidation';
 
 // Schema: campos esenciales obligatorios + opcionales. Mantenemos campos opcionales
 // (document_type, marital_status, occupation, province, postal_code, has_preexisting_*)
 // en el schema para no perder data existente, aunque la UI no los muestre por ahora.
 const beneficiarySchema = z.object({
-  first_name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
-  last_name: z.string().min(2, 'El apellido debe tener al menos 2 caracteres'),
+  // Nombre, apellido, parentesco y teléfono NO se validan acá: sus reglas
+  // dependen de si el titular es una empresa, así que las aplica
+  // `buildBeneficiarySchema` más abajo con la lógica compartida.
+  first_name: z.string(),
+  last_name: z.string(),
   dni: z.string().optional(),
   document_type: z.string().optional(),
   document_number: z.string().optional(),
   email: z.string().email('Email inválido').optional().or(z.literal('')),
   phone: z.string().optional(),
-  relationship: z.string().min(1, 'La relación es requerida'),
+  relationship: z.string().optional(),
   birth_date: z.string().optional(),
   gender: z.string().optional(),
   marital_status: z.string().optional(),
@@ -39,12 +48,35 @@ const beneficiarySchema = z.object({
 
 export type BeneficiaryFormData = z.infer<typeof beneficiarySchema>;
 
+/**
+ * El esquema depende del contexto, así que se arma por llamada:
+ * en una empresa el vínculo es el "Cargo" y no es obligatorio, y el teléfono
+ * sólo hace falta si el adherente tiene que firmar (el OTP va por WhatsApp).
+ * Las reglas viven en src/lib/beneficiaryValidation.ts, compartidas con el otro
+ * formulario de adherentes, que antes validaba distinto.
+ */
+const buildBeneficiarySchema = (ctx: BeneficiaryValidationContext) =>
+  beneficiarySchema.superRefine((data, refinement) => {
+    const error = validateBeneficiary(data, ctx);
+    if (!error) return;
+    const campo = error.includes('teléfono')
+      ? 'phone'
+      : error.includes('parentesco')
+        ? 'relationship'
+        : error.includes('apellido')
+          ? 'last_name'
+          : 'first_name';
+    refinement.addIssue({ code: z.ZodIssueCode.custom, path: [campo], message: error });
+  });
+
 interface BeneficiaryFormProps {
   defaultValues?: Partial<BeneficiaryFormData>;
   onSubmit: (data: BeneficiaryFormData) => void;
   onCancel: () => void;
   isSubmitting?: boolean;
   isEditing?: boolean;
+  /** `true` si el titular del contrato es una empresa. */
+  isCompany?: boolean;
 }
 
 export const BeneficiaryForm: React.FC<BeneficiaryFormProps> = ({
@@ -53,6 +85,7 @@ export const BeneficiaryForm: React.FC<BeneficiaryFormProps> = ({
   onCancel,
   isSubmitting = false,
   isEditing = false,
+  isCompany = false,
 }) => {
   const {
     register,
@@ -61,7 +94,7 @@ export const BeneficiaryForm: React.FC<BeneficiaryFormProps> = ({
     watch,
     formState: { errors },
   } = useForm<BeneficiaryFormData>({
-    resolver: zodResolver(beneficiarySchema),
+    resolver: zodResolver(buildBeneficiarySchema({ isCompany })),
     defaultValues: {
       is_primary: false,
       signature_required: true,
@@ -107,19 +140,28 @@ export const BeneficiaryForm: React.FC<BeneficiaryFormProps> = ({
           />
         </div>
         <div>
-          <Label htmlFor="relationship">Parentesco *</Label>
-          <Select onValueChange={(value) => setValue('relationship', value)} defaultValue={defaultValues?.relationship}>
-            <SelectTrigger>
-              <SelectValue placeholder="Seleccionar relación" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="conyuge">Cónyuge</SelectItem>
-              <SelectItem value="hijo">Hijo/a</SelectItem>
-              <SelectItem value="padre">Padre/Madre</SelectItem>
-              <SelectItem value="hermano">Hermano/a</SelectItem>
-              <SelectItem value="otro">Otro</SelectItem>
-            </SelectContent>
-          </Select>
+          <Label htmlFor="relationship">
+            {getRelationshipLabel({ isCompany })}
+            {isRelationshipRequired({ isCompany }) ? ' *' : ''}
+          </Label>
+          {/* En una empresa los adherentes son funcionarios: el vínculo es el
+              cargo, texto libre, y la lista de parentescos no aplica. */}
+          {isCompany ? (
+            <Input id="relationship" {...register('relationship')} placeholder="Ej: Gerente de Operaciones" />
+          ) : (
+            <Select onValueChange={(value) => setValue('relationship', value)} defaultValue={defaultValues?.relationship}>
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccionar relación" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="conyuge">Cónyuge</SelectItem>
+                <SelectItem value="hijo">Hijo/a</SelectItem>
+                <SelectItem value="padre">Padre/Madre</SelectItem>
+                <SelectItem value="hermano">Hermano/a</SelectItem>
+                <SelectItem value="otro">Otro</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
           {errors.relationship && (
             <p className="text-destructive text-sm mt-1">{errors.relationship.message}</p>
           )}

@@ -35,7 +35,7 @@ export const useAuditProcesses = () => {
           *,
           sales:sale_id(
             *,
-            clients:client_id(first_name, last_name, email),
+            clients:client_id(first_name, last_name, email, client_type, razon_social, ruc, dni),
             plans:plan_id(name, price)
           )
         `)

@@ -36,3 +36,22 @@ CLAUDE.md
 .mcp.json
 AGENTS.md
 nul
+# Artefactos generados por graphify (se regeneran con `graphify update .`)
+graphify-out/
+
+# Config local de otros asistentes de IA
+.codex/
+.opencode/
+
+# Blindaje LOCAL de los builds de produccion hechos en una maquina de desarrollo.
+# Vite carga .env.local en TODOS los modos, incluido production, asi que con un
+# .env.local apuntando a test un `npm run build` local dejaba un bundle partido:
+# client.ts resolvia a produccion pero los ~14 puntos que leen
+# import.meta.env.VITE_SUPABASE_URL directo (flujo de firma) apuntaban a test.
+# .env.production es especifico del modo y le gana a .env.local, cerrando el hueco.
+# No se versiona porque en Docker/Lovable no existe .env.local y alli no hace falta.
+# Para recrearlo: mismas 3 variables que .env (project id, url y publishable key de BR).
+.env.production
+
+# Artefactos locales del CLI de Supabase (link al proyecto de la maquina)
+supabase/.temp/

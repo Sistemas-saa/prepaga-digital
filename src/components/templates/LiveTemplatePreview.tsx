@@ -398,7 +398,7 @@ export const LiveTemplatePreview: React.FC<LiveTemplatePreviewProps> = ({
                   </h4>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div><span className="text-muted-foreground">Nombre:</span> {context.cliente.nombreCompleto}</div>
-                    <div><span className="text-muted-foreground">C.I.:</span> {context.cliente.ci || context.cliente.dni}</div>
+                    <div><span className="text-muted-foreground">{context.cliente.documentoLabel}:</span> {context.cliente.documento || context.cliente.ci || context.cliente.dni}</div>
                     <div><span className="text-muted-foreground">Email:</span> {context.cliente.email}</div>
                     <div><span className="text-muted-foreground">Teléfono:</span> {context.cliente.telefono}</div>
                   </div>

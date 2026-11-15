@@ -14,6 +14,8 @@ import { useSimpleAuthContext } from '@/components/SimpleAuthProvider';
 import { formatCurrency } from '@/lib/utils';
 import { formatDateOnly } from '@/lib/dateOnly';
 import { getDocumentAccessUrl } from '@/lib/assetUrlHelper';
+import { getClientDisplayName, getClientDocument, getClientDocumentLabel } from '@/lib/clientUtils';
+import { invalidateSalesCaches } from '@/hooks/useSales';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   CheckCircle, XCircle, Clock, AlertCircle, Eye, Search,
@@ -165,6 +167,17 @@ export const AuditorDashboard: React.FC = () => {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const canViewAllAuditSales = userRole === 'auditor' || userRole === 'admin' || userRole === 'super_admin' || userRole === 'supervisor';
 
+  // Tras una accion de auditoria hay que refrescar TODAS las vistas que muestran la venta.
+  // Incluye ['sale', saleId] (la que alimenta Editar Venta -> Templates): sin eso, el gate
+  // "Pendiente de Aprobacion" seguia bloqueado con el audit_status viejo servido desde cache.
+  const invalidateAuditCaches = (saleId?: string) => {
+    queryClient.invalidateQueries({ queryKey: ['auditor-sales-list'] });
+    if (saleId) {
+      queryClient.invalidateQueries({ queryKey: ['auditor-sale-detail', saleId] });
+    }
+    invalidateSalesCaches(queryClient, saleId);
+  };
+
   const openAttachedDocument = async (fileUrl: string | null | undefined) => {
     if (!fileUrl) {
       toast({
@@ -205,7 +218,7 @@ export const AuditorDashboard: React.FC = () => {
           contract_number,
           contract_start_date,
           created_at,
-          clients:client_id (id, first_name, last_name),
+          clients:client_id (id, first_name, last_name, client_type, razon_social, ruc, dni),
           plans:plan_id (id, name)
         `)
         .order('created_at', { ascending: false });
@@ -260,7 +273,7 @@ export const AuditorDashboard: React.FC = () => {
           contract_start_date,
           immediate_coverage,
           sale_type,
-          clients:client_id (id, first_name, last_name, email, phone, dni, birth_date, address, barrio, city),
+          clients:client_id (id, first_name, last_name, client_type, razon_social, ruc, email, phone, dni, birth_date, address, barrio, city),
           plans:plan_id (id, name)
         `)
         .eq('id', selectedSaleId);
@@ -472,9 +485,8 @@ export const AuditorDashboard: React.FC = () => {
         logBestEffortInsertError('notifications', notificationError);
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['audit-sales'] });
-      queryClient.invalidateQueries({ queryKey: ['sales'] });
+    onSuccess: (_data, saleId) => {
+      invalidateAuditCaches(saleId);
       setSelectedSaleId(null);
       setAuditNotes('');
       toast({
@@ -544,9 +556,8 @@ export const AuditorDashboard: React.FC = () => {
         logBestEffortInsertError('notifications', notificationError);
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['audit-sales'] });
-      queryClient.invalidateQueries({ queryKey: ['sales'] });
+    onSuccess: (_data, saleId) => {
+      invalidateAuditCaches(saleId);
       setSelectedSaleId(null);
       setAuditNotes('');
       toast({
@@ -626,9 +637,8 @@ export const AuditorDashboard: React.FC = () => {
         logBestEffortInsertError('notifications', notificationError);
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['audit-sales'] });
-      queryClient.invalidateQueries({ queryKey: ['sales'] });
+    onSuccess: (_data, saleId) => {
+      invalidateAuditCaches(saleId);
       setSelectedSaleId(null);
       setAuditNotes('');
       toast({
@@ -788,7 +798,7 @@ export const AuditorDashboard: React.FC = () => {
             <CardContent className="space-y-3">
               <div>
                 <span className="font-medium">Nombre: </span>
-                {selectedSale.clients?.first_name} {selectedSale.clients?.last_name}
+                {getClientDisplayName(selectedSale.clients)}
               </div>
               <div>
                 <span className="font-medium">Email: </span>
@@ -799,8 +809,8 @@ export const AuditorDashboard: React.FC = () => {
                 {selectedSale.clients?.phone || 'No especificado'}
               </div>
               <div>
-                <span className="font-medium">C.I.: </span>
-                {selectedSale.clients?.dni || 'No especificado'}
+                <span className="font-medium">{getClientDocumentLabel(selectedSale.clients)}: </span>
+                {getClientDocument(selectedSale.clients) || 'No especificado'}
               </div>
               {selectedSale.clients?.birth_date && (
                 <div>

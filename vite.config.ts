@@ -14,7 +14,15 @@ const readGitInfo = () => {
       return "unknown";
     }
   };
-  return { commit: run("git rev-parse --short HEAD"), branch: run("git rev-parse --abbrev-ref HEAD") };
+  // En Docker no hay .git: el Dockerfile pasa GIT_COMMIT / GIT_BRANCH como build-arg.
+  const env = (name: string) => {
+    const v = process.env[name]?.trim();
+    return v && v !== "unknown" ? v : null;
+  };
+  return {
+    commit: env("GIT_COMMIT") ?? run("git rev-parse --short HEAD"),
+    branch: env("GIT_BRANCH") ?? run("git rev-parse --abbrev-ref HEAD"),
+  };
 };
 
 // https://vitejs.dev/config/

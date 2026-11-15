@@ -1,0 +1,30 @@
+# Imagen para el AMBIENTE DE PRUEBAS (Supabase US test — ykducvvcjzdpoojxlsig).
+#
+# ⚠ NO reemplaza al Dockerfile de producción: ese sigue intacto y sigue usando
+# `npm run build` (BR prod). Este archivo es aditivo y exclusivo de test.
+#
+# La diferencia clave está en el RUN: usa `npm run build:us`, que compila con
+# `vite --mode us` y a continuación ejecuta `scripts/verify-us-bundle.mjs`.
+# Ese verificador falla el build si el bundle contiene alguna URL de BR, así que
+# es IMPOSIBLE que esta imagen quede apuntando a producción: revienta antes de
+# generar la capa de nginx.
+FROM node:20-alpine AS build
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --legacy-peer-deps --no-audit --no-fund --prefer-offline || \
+    npm install --legacy-peer-deps --no-audit --no-fund
+
+COPY . .
+
+# build:us = vite build --mode us && node scripts/verify-us-bundle.mjs
+# Lee .env.us (trackeado) y client.ts valida que el ref sea ykducvvcjzdpoojxlsig.
+RUN npm run build:us
+
+FROM nginx:1.27-alpine
+
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80

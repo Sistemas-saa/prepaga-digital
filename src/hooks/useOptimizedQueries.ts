@@ -1,6 +1,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { excludeIncorporationSales } from '@/lib/saleFilters';
 
 // Hook optimizado para dashboard con LIMIT y columnas específicas
 export const useOptimizedDashboard = () => {
@@ -9,12 +10,12 @@ export const useOptimizedDashboard = () => {
     queryFn: async () => {
       // Solo obtener las columnas necesarias con LIMIT
       const [salesResult, clientsResult, recentSalesResult] = await Promise.all([
-        // Stats básicas de ventas
-        supabase
+        // Stats básicas de ventas (sin las operaciones de incorporación)
+        excludeIncorporationSales(supabase
           .from('sales')
           .select('id, status, total_amount, created_at')
           .order('created_at', { ascending: false })
-          .limit(100),
+          .limit(100)),
 
         // Count de clientes
         supabase
@@ -22,7 +23,7 @@ export const useOptimizedDashboard = () => {
           .select('id', { count: 'exact', head: true }),
 
         // Ventas recientes con relaciones mínimas
-        supabase
+        excludeIncorporationSales(supabase
           .from('sales')
           .select(`
             id,
@@ -30,11 +31,11 @@ export const useOptimizedDashboard = () => {
             total_amount,
             status,
             created_at,
-            clients:client_id(first_name, last_name),
+            clients:client_id(first_name, last_name, client_type, razon_social, ruc, dni),
             plans:plan_id(name)
           `)
           .order('created_at', { ascending: false })
-          .limit(5)
+          .limit(5))
       ]);
 
       if (salesResult.error) throw salesResult.error;
@@ -96,8 +97,8 @@ export const useOptimizedSearch = (searchTerm: string, table: 'clients' | 'sales
       if (table === 'clients') {
         const { data, error } = await supabase
           .from('clients')
-          .select('id, first_name, last_name, email, dni')
-          .or(`first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,dni.ilike.%${searchTerm}%`)
+          .select('id, first_name, last_name, email, dni, client_type, razon_social, ruc')
+          .or(`first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%,razon_social.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,dni.ilike.%${searchTerm}%,ruc.ilike.%${searchTerm}%`)
           .limit(10);
 
         if (error) throw error;

@@ -2,8 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 async function sha256Hex(data: Uint8Array): Promise<string> {
@@ -11,593 +10,285 @@ async function sha256Hex(data: Uint8Array): Promise<string> {
   return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-interface BrandingInfo {
-  companyName: string;
-  logoUrl: string | null;
-  phone: string | null;
-  address: string | null;
-  email: string | null;
-  headerImageUrl: string | null;
-  footerImageUrl: string | null;
+async function urlToBase64DataUrl(url: string): Promise<string | null> {
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return null;
+    const buf = await resp.arrayBuffer();
+    const ct = resp.headers.get("Content-Type") || "image/png";
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 8192)
+      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    return `data:${ct};base64,${btoa(binary)}`;
+  } catch (e) {
+    console.warn("urlToBase64DataUrl failed:", url, e);
+    return null;
+  }
 }
 
-/**
- * Build the header/footer templates for Puppeteer's displayHeaderFooter feature.
- * These render natively on every PDF page — no CSS tricks needed.
- */
-function buildPuppeteerTemplates(branding: BrandingInfo): { headerTemplate: string; footerTemplate: string } {
-  // Puppeteer header/footer templates require EXPLICIT dimensions (height:100% resolves to 0
-  // because the parent has no explicit height in Puppeteer's rendering context).
-  // font-size must also be explicit (default is 0).
-  const headerTemplate = branding.headerImageUrl
-    ? `<div style="font-size:10px;width:100%;height:24mm;padding:0 15mm;margin:0;text-align:center;"><img src="${branding.headerImageUrl}" style="display:inline-block;max-width:100%;max-height:24mm;width:auto;height:auto;object-fit:contain;" /></div>`
-    : `<div style="font-size:10px;width:100%;height:24mm;"></div>`;
-
-  const footerTemplate = branding.footerImageUrl
-    ? `<div style="font-size:10px;width:100%;height:18mm;padding:0 15mm;margin:0;text-align:center;"><img src="${branding.footerImageUrl}" style="display:inline-block;max-width:100%;max-height:18mm;width:auto;height:auto;object-fit:contain;" /></div>`
-    : `<div style="font-size:10px;width:100%;height:18mm;"></div>`;
-
-  return { headerTemplate, footerTemplate };
+async function resolveStorageUrl(url: string | null, admin: any): Promise<string | null> {
+  if (!url) return null;
+  if (!url.includes(".supabase.co/storage/v1/")) return url;
+  if (url.includes("/object/public/")) return url;
+  const m = url.match(/\/storage\/v1\/object\/(?:sign|public)\/([^/]+)\/([^?]+)/);
+  if (!m) return url;
+  const { data } = await admin.storage.from(m[1]).createSignedUrl(decodeURIComponent(m[2]), 3600);
+  return data?.signedUrl || url;
 }
 
-function buildWrappedHtml(
-  bodyContent: string,
-  _branding: BrandingInfo,
-  _documentName: string
-): string {
-  // Header/footer are handled via Puppeteer's displayHeaderFooter + headerTemplate/footerTemplate.
-  // This function only wraps the body content with styling.
-  return `<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8"/>
-<style>
-  @page { size: A4; }
-  * { box-sizing: border-box; }
-
-  body {
-    margin: 0;
-    padding: 0;
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 12px;
-    color: #222;
+function stripKnownBrandingUrls(html: string, knownUrls: string[]): string {
+  if (!html || !knownUrls.length) return html;
+  let result = html;
+  for (const url of knownUrls) {
+    const esc = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(`<p[^>]*>\\s*<img[^>]*src="${esc}"[^>]*\\s*/?>\\s*<\/p>`, "gi"), "");
+    result = result.replace(new RegExp(`<img[^>]*src="${esc}"[^>]*\\s*/?>`, "gi"), "");
   }
-
-  /* ── Main content ── */
-  .content {
-    width: 100%;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-
-  /* Ensure images in content don't overflow */
-  .content img,
-  .content svg,
-  .content canvas,
-  .content iframe {
-    max-width: 100% !important;
-    height: auto !important;
-  }
-
-  .content img[style*="width"],
-  .content img[width] {
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-
-  /* Table styling for content tables */
-  .content table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-  }
-  .content table td, .content table th {
-    padding: 4px 6px;
-    word-break: break-word;
-  }
-
-  .content > *,
-  .content .ProseMirror,
-  .content [style*="width"] {
-    max-width: 100% !important;
-  }
-</style>
-</head>
-<body>
-  <div class="content">
-    ${bodyContent}
-  </div>
-</body>
-</html>`;
+  return result.trim();
 }
 
-/**
- * Strip embedded branding images (cabecera/zócalo) from template content
- * since the wrapper already adds proper header/footer via CSS fixed positioning.
- * This prevents duplicate headers/footers in the generated PDF.
- */
-function normalizeLegacyContractHeader(html: string): string {
-  if (!html) return html;
-
-  // Remove leading branding images (cabecera) — the wrapper header already shows the logo
-  html = html.replace(
-    /^\s*(<p[^>]*>\s*)?<img\b[^>]*src="[^"]*\/company-assets\/[^"]*\/branding\/[^"]*"[^>]*\/?>\s*(<\/p>)?\s*/i,
-    ''
-  );
-
-  // Remove trailing branding images (zócalo/footer) at the end of content
-  html = html.replace(
-    /\s*(<p[^>]*>\s*)?<img\b[^>]*src="[^"]*\/company-assets\/[^"]*\/branding\/[^"]*"[^>]*\/?>\s*(<\/p>)?\s*$/i,
-    ''
-  );
-
-  return html;
-}
-
-/**
- * Resolve expired Supabase Storage signed URLs in HTML content.
- */
 async function resolveContentImages(
   html: string,
-  supabaseAdmin: any,
-  bucket: string
+  admin: any,
+  bucket: string,
+  brandingUrls: string[]
 ): Promise<string> {
   if (!html) return html;
-  html = normalizeLegacyContractHeader(html);
-
-  const imgRegex = /<img\s[^>]*>/gi;
-  const matches = html.match(imgRegex);
+  html = stripKnownBrandingUrls(html, brandingUrls);
+  const matches = html.match(/<img\s[^>]*>/gi);
   if (!matches) return html;
-
   let result = html;
-
   for (const imgTag of matches) {
-    const spMatch = imgTag.match(/data-storage-path="([^"]+)"/);
-    if (spMatch) {
-      const storagePath = spMatch[1];
-      const { data } = await supabaseAdmin.storage
-        .from(bucket)
-        .createSignedUrl(storagePath, 3600);
+    const srcM = imgTag.match(/src="([^"]+)"/);
+    if (!srcM || srcM[1].startsWith("data:")) continue;
+    const spM = imgTag.match(/data-storage-path="([^"]+)"/);
+    if (spM) {
+      const { data } = await admin.storage.from(bucket).createSignedUrl(spM[1], 3600);
       if (data?.signedUrl) {
-        const updatedTag = imgTag.replace(/src="[^"]*"/, `src="${data.signedUrl}"`);
-        result = result.replace(imgTag, updatedTag);
+        const b64 = await urlToBase64DataUrl(data.signedUrl);
+        result = result.replace(imgTag, imgTag.replace(/src="[^"]*"/, `src="${b64 || data.signedUrl}"`));
       }
       continue;
     }
-
-    const srcMatch = imgTag.match(/src="([^"]+)"/);
-    if (!srcMatch) continue;
-    const src = srcMatch[1];
-
-    if (src.includes('.supabase.co/storage/v1/')) {
-      const pathMatch = src.match(/\/storage\/v1\/object\/(?:sign|public)\/([^/]+)\/([^?]+)/);
-      if (pathMatch) {
-        const srcBucket = pathMatch[1];
-        const storagePath = decodeURIComponent(pathMatch[2]);
-        const { data } = await supabaseAdmin.storage
-          .from(srcBucket)
-          .createSignedUrl(storagePath, 3600);
+    if (srcM[1].includes(".supabase.co/storage/v1/")) {
+      const m = srcM[1].match(/\/storage\/v1\/object\/(?:sign|public)\/([^/]+)\/([^?]+)/);
+      if (m) {
+        const { data } = await admin.storage.from(m[1]).createSignedUrl(decodeURIComponent(m[2]), 3600);
         if (data?.signedUrl) {
-          const updatedTag = imgTag.replace(/src="[^"]*"/, `src="${data.signedUrl}"`);
-          result = result.replace(imgTag, updatedTag);
+          const b64 = await urlToBase64DataUrl(data.signedUrl);
+          result = result.replace(imgTag, imgTag.replace(/src="[^"]*"/, `src="${b64 || data.signedUrl}"`));
         }
       }
     }
   }
-
-  return normalizeLegacyContractHeader(result);
-}
-
-/**
- * Fetch an image URL and return a base64 data URI for reliable rendering.
- * Falls back to the original URL if fetching fails.
- */
-async function imageUrlToDataUri(url: string): Promise<string> {
-  try {
-    const resp = await fetch(url);
-    if (!resp.ok) return url;
-    const contentType = resp.headers.get("content-type") || "image/png";
-    const buffer = new Uint8Array(await resp.arrayBuffer());
-    let binary = "";
-    for (let i = 0; i < buffer.length; i++) {
-      binary += String.fromCharCode(buffer[i]);
-    }
-    const b64 = btoa(binary);
-    return `data:${contentType};base64,${b64}`;
-  } catch {
-    return url;
-  }
-}
-
-/**
- * Resolve a storage or public URL to a fresh signed URL.
- */
-async function resolveStorageUrl(
-  url: string | null,
-  supabaseAdmin: any
-): Promise<string | null> {
-  if (!url) return null;
-
-  if (url.includes('.supabase.co/storage/v1/')) {
-    // If it's a public URL, return as-is (public bucket)
-    if (url.includes('/object/public/')) return url;
-    
-    const pathMatch = url.match(/\/storage\/v1\/object\/(?:sign|public)\/([^/]+)\/([^?]+)/);
-    if (pathMatch) {
-      const bucket = pathMatch[1];
-      const storagePath = decodeURIComponent(pathMatch[2]);
-      const { data } = await supabaseAdmin.storage
-        .from(bucket)
-        .createSignedUrl(storagePath, 3600);
-      if (data?.signedUrl) return data.signedUrl;
-    }
-  }
-
-  return url;
-}
-
-function isMissingPrintVersionsTable(error: { code?: string; message?: string } | null): boolean {
-  if (!error) return false;
-  const message = error.message || "";
-  return (
-    error.code === "42P01" ||
-    error.code === "PGRST205" ||
-    message.includes('relation "document_print_versions" does not exist') ||
-    message.includes("Could not find the table")
-  );
-}
-
-function formatDatePy(dateValue: string | null | undefined): string {
-  if (!dateValue) return "";
-  const date = new Date(dateValue.includes("T") ? dateValue : `${dateValue}T00:00:00`);
-  return date.toLocaleDateString("es-PY");
-}
-
-function formatDateLongPy(dateValue: string | null | undefined): string {
-  if (!dateValue) return "";
-  const date = new Date(dateValue.includes("T") ? dateValue : `${dateValue}T00:00:00`);
-  return date.toLocaleDateString("es-PY", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-}
-
-function ensureContractStartDateInBilling(html: string, contractStartDate: string | null | undefined): string {
-  if (!html) return html;
-  const formattedDate = contractStartDate ? formatDateLongPy(contractStartDate) : "";
-
-  // 1. Reemplazar placeholder literal {{fecha_inicio_contrato}} (con o sin espacios)
-  let result = html.replace(/\{\{\s*fecha_inicio_contrato\s*\}\}/gi, formattedDate);
-
-  // 2. Si el contenido NO menciona "Fecha de inicio de contrato" pero tiene "DATOS DE FACTURACIÓN",
-  //    inyectarla después del título (solo si hay fecha disponible)
-  if (formattedDate && !result.includes("Fecha de inicio de contrato") && result.includes("DATOS DE FACTURACIÓN")) {
-    result = result.replace(
-      "<h3>DATOS DE FACTURACIÓN</h3>",
-      `<h3>DATOS DE FACTURACIÓN</h3><p>Fecha de inicio de contrato: <strong>${formattedDate}</strong></p>`
-    );
-  }
-
   return result;
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+function buildHtml(
+  bodyContent: string,
+  headerDataUrl: string | null,
+  footerDataUrl: string | null,
+  logoDataUrl: string | null,
+  companyName: string,
+  address: string | null,
+  phone: string | null,
+): string {
+  let headerCellContent: string;
+  if (headerDataUrl) {
+    headerCellContent = `<img src="${headerDataUrl}" style="display:block;width:100%;height:20mm;object-fit:fill;object-position:center;" />`;
+  } else if (logoDataUrl) {
+    headerCellContent = `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:0 18mm;height:20mm;">
+        <img src="${logoDataUrl}" style="height:16mm;width:auto;object-fit:contain;display:block;" />
+        <span style="font-family:'Times New Roman',serif;font-size:11px;color:#1a3a5c;font-style:italic;">${companyName}</span>
+      </div>`;
+  } else {
+    headerCellContent = `<div style="display:flex;align-items:center;justify-content:center;height:20mm;font-family:Arial,sans-serif;font-size:12px;font-weight:bold;color:#1a3a5c;">${companyName}</div>`;
   }
 
+  let footerCellContent: string;
+  if (footerDataUrl) {
+    footerCellContent = `
+      <div style="display:flex;align-items:center;justify-content:center;width:100%;height:9mm;padding:0 14mm;box-sizing:border-box;">
+        <img src="${footerDataUrl}" style="display:block;max-height:8mm;width:100%;object-fit:contain;object-position:center center;" />
+      </div>`;
+  } else {
+    const parts: string[] = [];
+    if (address) parts.push(address);
+    if (phone) parts.push(`Tel: ${phone}`);
+    const text = parts.join("  •  ") || companyName;
+    footerCellContent = `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:0 18mm;height:9mm;font-family:Arial,sans-serif;font-size:8px;color:#555;">
+        <span>${text}</span>
+      </div>`;
+  }
+
+  return `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"/>
+<style>
+  @media print { @page { size: A4; margin: 0; } }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { margin: 0; padding: 0; font-family: 'Times New Roman', Times, serif; font-size: 11pt; color: #111; background: #fff; line-height: 1.45; }
+  table.print-shell { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  .header-cell { padding: 0; height: 20mm; vertical-align: middle; border-bottom: 1px solid #bbb; overflow: hidden; }
+  .footer-cell { padding: 0; height: 9mm; vertical-align: middle; border-top: 1px solid #ccc; }
+  .content-cell { padding: 5mm 18mm 8mm 18mm; vertical-align: top; width: 100%; }
+  .content-cell p { text-align: justify; margin-bottom: 4pt; orphans: 3; widows: 3; }
+  .content-cell p[style*="font-size:11px"],
+  .content-cell p[style*="font-size: 11px"],
+  .content-cell p[style*="font-weight:bold"],
+  .content-cell p[style*="font-weight: bold"] { text-align: left !important; }
+  .content-cell h1 { font-size: 13pt; text-align: center; text-transform: uppercase; margin-bottom: 8pt; }
+  .content-cell h2 { font-size: 12pt; margin-top: 8pt; margin-bottom: 4pt; }
+  .content-cell h3 { font-size: 11pt; margin-top: 6pt; margin-bottom: 3pt; }
+  .content-cell table { width: 100%; border-collapse: collapse; margin: 5pt 0; font-size: 10pt; }
+  .content-cell table td, .content-cell table th { border: 1px solid #777 !important; padding: 4px 7px; vertical-align: top; }
+  .content-cell table th { background-color: #f0f0f0; font-weight: 600; text-align: left; }
+  .content-cell thead { display: table-header-group; }
+  .content-cell tfoot { display: table-footer-group; }
+  .content-cell img { max-width: 100% !important; height: auto !important; }
+  .content-cell img[alt="Firma digital"] { max-width: 260px !important; max-height: 110px !important; }
+  .no-break { break-inside: avoid; page-break-inside: avoid; }
+  .page-break { break-before: page; page-break-before: always; }
+  [class*="firma"], [class*="sign"], [class*="signature"] { break-inside: avoid !important; page-break-inside: avoid !important; }
+  .content-cell > div:last-child, .content-cell > section:last-child, .content-cell > table:last-child { break-inside: avoid; page-break-inside: avoid; margin-bottom: 6mm; }
+</style>
+</head>
+<body>
+<table class="print-shell">
+  <thead><tr><th class="header-cell">${headerCellContent}</th></tr></thead>
+  <tfoot><tr><td class="footer-cell">${footerCellContent}</td></tr></tfoot>
+  <tbody><tr><td class="content-cell">${bodyContent}</td></tr></tbody>
+</table>
+</body></html>`;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
   try {
-    // Auth guard
     const authHeader = req.headers.get("Authorization") || "";
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const isServiceCall = authHeader === `Bearer ${serviceKey}`;
     let authenticatedUserId: string | null = null;
-    if (!isServiceCall) {
-      const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-      const userClient = createClient(Deno.env.get("SUPABASE_URL")!, anonKey, {
+
+    if (authHeader !== `Bearer ${serviceKey}`) {
+      const uc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
         global: { headers: { Authorization: authHeader } },
       });
-      const { data, error } = await userClient.auth.getUser();
-      if (error || !data?.user) {
-        return new Response(JSON.stringify({ error: "Unauthorized" }), {
-          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+      const { data, error } = await uc.auth.getUser();
+      if (error || !data?.user) return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
       authenticatedUserId = data.user.id;
     }
 
     const { document_id, admin_regeneration, reason } = await req.json();
-    if (!document_id) {
-      return new Response(JSON.stringify({ error: "document_id is required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    if (!document_id) return new Response(JSON.stringify({ error: "document_id required" }), {
+      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
 
-    const supabaseAdmin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data: doc } = await admin.from("documents").select("id,sale_id,content,name").eq("id", document_id).single();
+    if (!doc?.content) return new Response(JSON.stringify({ error: "Document not found or no content" }), {
+      status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
 
-    // 1. Fetch document
-    const { data: doc, error: docErr } = await supabaseAdmin
-      .from("documents")
-      .select("id, sale_id, content, name")
-      .eq("id", document_id)
-      .single();
+    let logoDataUrl: string | null = null;
+    let headerDataUrl: string | null = null;
+    let footerDataUrl: string | null = null;
+    const brandingUrls: string[] = [];
+    let companyName = "", phone: string | null = null, address: string | null = null;
 
-    if (docErr || !doc) {
-      return new Response(JSON.stringify({ error: "Document not found" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (!doc.content) {
-      return new Response(JSON.stringify({ error: "Document has no HTML content" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // 2. Fetch company info via sale
-    let branding: BrandingInfo = {
-      companyName: "",
-      logoUrl: null,
-      phone: null,
-      address: null,
-      email: null,
-      headerImageUrl: null,
-      footerImageUrl: null,
-    };
-
-    const { data: sale } = await supabaseAdmin
-      .from("sales")
-      .select("company_id, contract_start_date")
-      .eq("id", doc.sale_id)
-      .single();
-
+    const { data: sale } = await admin.from("sales").select("company_id").eq("id", doc.sale_id).single();
     if (sale?.company_id) {
-      const { data: comp } = await supabaseAdmin
-        .from("companies")
-        .select("name, logo_url, phone, address, email")
-        .eq("id", sale.company_id)
-        .single();
-      if (comp) {
-        branding.companyName = comp.name;
-        branding.logoUrl = comp.logo_url;
-        branding.phone = comp.phone;
-        branding.address = comp.address;
-        branding.email = comp.email;
+      const [compRes, csRes] = await Promise.all([
+        admin.from("companies").select("name,logo_url,phone,address").eq("id", sale.company_id).single(),
+        admin.from("company_settings").select("pdf_header_image_url,pdf_footer_image_url").eq("company_id", sale.company_id).single(),
+      ]);
+      if (compRes.data) {
+        companyName = compRes.data.name || "";
+        phone = compRes.data.phone || null;
+        address = compRes.data.address || null;
+        const logoUrl = await resolveStorageUrl(compRes.data.logo_url, admin);
+        if (logoUrl) logoDataUrl = await urlToBase64DataUrl(logoUrl);
       }
-
-      // Fetch dedicated PDF branding images from company_settings
-      const { data: settings } = await supabaseAdmin
-        .from("company_settings")
-        .select("pdf_header_image_url, pdf_footer_image_url")
-        .eq("company_id", sale.company_id)
-        .single();
-
-      if (settings) {
-        branding.headerImageUrl = settings.pdf_header_image_url || null;
-        branding.footerImageUrl = settings.pdf_footer_image_url || null;
+      if (csRes.data) {
+        const hOrig = (csRes.data as any).pdf_header_image_url as string | null;
+        const fOrig = (csRes.data as any).pdf_footer_image_url as string | null;
+        if (hOrig) brandingUrls.push(hOrig);
+        if (fOrig) brandingUrls.push(fOrig);
+        const hUrl = await resolveStorageUrl(hOrig, admin);
+        const fUrl = await resolveStorageUrl(fOrig, admin);
+        if (hUrl) { headerDataUrl = await urlToBase64DataUrl(hUrl); console.log("[header]", headerDataUrl ? `OK ${headerDataUrl.length}b` : "FAIL"); }
+        if (fUrl) { footerDataUrl = await urlToBase64DataUrl(fUrl); console.log("[footer]", footerDataUrl ? `OK ${footerDataUrl.length}b` : "FAIL"); }
       }
     }
 
-    // 2b. Resolve all branding URLs then convert to data URIs for reliable rendering
-    branding.logoUrl = await resolveStorageUrl(branding.logoUrl, supabaseAdmin);
-    branding.headerImageUrl = await resolveStorageUrl(branding.headerImageUrl, supabaseAdmin);
-    branding.footerImageUrl = await resolveStorageUrl(branding.footerImageUrl, supabaseAdmin);
-
-    // Convert branding images to base64 data URIs to avoid network loading issues in renderer
-    if (branding.headerImageUrl) {
-      branding.headerImageUrl = await imageUrlToDataUri(branding.headerImageUrl);
-    }
-    if (branding.footerImageUrl) {
-      branding.footerImageUrl = await imageUrlToDataUri(branding.footerImageUrl);
-    }
-    if (branding.logoUrl) {
-      branding.logoUrl = await imageUrlToDataUri(branding.logoUrl);
-    }
-
-    // 2c. Resolve expired image URLs in document content
     const bucket = Deno.env.get("STORAGE_BUCKET") || "documents";
-    const contentWithContractStart = ensureContractStartDateInBilling(doc.content, sale?.contract_start_date);
-    const resolvedContent = await resolveContentImages(contentWithContractStart, supabaseAdmin, bucket);
+    const resolvedContent = await resolveContentImages(doc.content, admin, bucket, brandingUrls);
+    const html = buildHtml(resolvedContent, headerDataUrl, footerDataUrl, logoDataUrl, companyName, address, phone);
 
-    // 3. Build wrapped HTML and Puppeteer header/footer templates
-    const wrappedHtml = buildWrappedHtml(resolvedContent, branding, doc.name || "Documento");
-    const { headerTemplate, footerTemplate } = buildPuppeteerTemplates(branding);
-
-    // 4. Call render service
     const renderUrl = Deno.env.get("RENDER_URL");
     const renderKey = Deno.env.get("RENDER_KEY");
-    if (!renderUrl || !renderKey) {
-      return new Response(JSON.stringify({ error: "RENDER_URL or RENDER_KEY not configured" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    if (!renderUrl || !renderKey) return new Response(JSON.stringify({ error: "RENDER_URL/KEY not set" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
 
-    const renderResponse = await fetch(renderUrl, {
+    const rr = await fetch(renderUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-RENDER-KEY": renderKey,
-      },
+      headers: { "Content-Type": "application/json", "X-RENDER-KEY": renderKey },
       body: JSON.stringify({
-        html: wrappedHtml,
+        html,
         options: {
           format: "A4",
           printBackground: true,
-          displayHeaderFooter: true,
-          headerTemplate,
-          footerTemplate,
-          margin: { top: "28mm", right: "15mm", bottom: "20mm", left: "15mm" },
-          waitUntil: "networkidle0",
+          displayHeaderFooter: false,
+          margin: { top: "0mm", right: "0mm", bottom: "0mm", left: "0mm" },
         },
       }),
     });
 
-    if (!renderResponse.ok) {
-      const errText = await renderResponse.text();
-      console.error("Render service error:", errText);
-      return new Response(JSON.stringify({ error: "Render service failed", details: errText }), {
-        status: 502,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    if (!rr.ok) return new Response(JSON.stringify({ error: "Render failed", details: await rr.text() }), {
+      status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
 
-    const pdfBytes = new Uint8Array(await renderResponse.arrayBuffer());
+    const pdf = new Uint8Array(await rr.arrayBuffer());
+    const hash = await sha256Hex(pdf);
 
-    // 5. Calculate SHA-256
-    const hash = await sha256Hex(pdfBytes);
-
-    // 6. Determine mode: versioned print or standard base PDF
     if (admin_regeneration) {
-      // === Versioned print mode ===
-      // Get next version number
-      const { data: lastVersion, error: lastVersionError } = await supabaseAdmin
-        .from("document_print_versions")
-        .select("version_number")
-        .eq("document_id", document_id)
-        .order("version_number", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (lastVersionError) {
-        const details = isMissingPrintVersionsTable(lastVersionError)
-          ? "document_print_versions table is missing in this environment"
-          : lastVersionError.message;
-
-        return new Response(JSON.stringify({ error: "Print version infrastructure is not available", details }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
+      const { data: lastVersion } = await admin
+        .from("document_print_versions").select("version_number")
+        .eq("document_id", document_id).order("version_number", { ascending: false }).limit(1).maybeSingle();
       const nextVersion = (lastVersion?.version_number || 0) + 1;
       const versionPath = `contracts/print-versions/${doc.sale_id}/${doc.id}/v${nextVersion}.pdf`;
-
-      const { error: uploadErr } = await supabaseAdmin.storage
-        .from(bucket)
-        .upload(versionPath, pdfBytes, {
-          contentType: "application/pdf",
-          upsert: true,
-        });
-
-      if (uploadErr) {
-        console.error("Storage upload error:", uploadErr);
-        return new Response(JSON.stringify({ error: "Storage upload failed", details: uploadErr.message }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      // Mark previous versions as not current
-      const { error: resetVersionsError } = await supabaseAdmin
-        .from("document_print_versions")
-        .update({ is_current: false })
-        .eq("document_id", document_id);
-
-      if (resetVersionsError) {
-        const details = isMissingPrintVersionsTable(resetVersionsError)
-          ? "document_print_versions table is missing in this environment"
-          : resetVersionsError.message;
-
-        return new Response(JSON.stringify({ error: "Could not update previous print versions", details }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      // Insert new version record
-      const versionPdfUrl = `${bucket}:${versionPath}`;
-      const { error: insertErr } = await supabaseAdmin
-        .from("document_print_versions")
-        .insert({
-          document_id,
-          sale_id: doc.sale_id,
-          version_number: nextVersion,
-          pdf_url: versionPdfUrl,
-          pdf_hash: hash,
-          reason: reason || null,
-          generated_by: authenticatedUserId,
-          is_current: true,
-        });
-
-      if (insertErr) {
-        const details = isMissingPrintVersionsTable(insertErr)
-          ? "document_print_versions table is missing in this environment"
-          : insertErr.message;
-
-        return new Response(JSON.stringify({ error: "Could not persist the print version", details }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          mode: "versioned_print",
-          document_id,
-          version_number: nextVersion,
-          pdf_url: versionPdfUrl,
-          note: `Versión de impresión v${nextVersion} generada. El PDF firmado original no fue modificado.`,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // === Standard base PDF mode ===
-    const storagePath = `contracts/base/${doc.sale_id}/${doc.id}.pdf`;
-
-    const { error: uploadErr } = await supabaseAdmin.storage
-      .from(bucket)
-      .upload(storagePath, pdfBytes, {
-        contentType: "application/pdf",
-        upsert: true,
+      await admin.storage.from(bucket).upload(versionPath, pdf, { contentType: "application/pdf", upsert: true });
+      await admin.from("document_print_versions").update({ is_current: false }).eq("document_id", document_id);
+      await admin.from("document_print_versions").insert({
+        document_id, sale_id: doc.sale_id, version_number: nextVersion,
+        pdf_url: `${bucket}:${versionPath}`, pdf_hash: hash,
+        reason: reason || null, generated_by: authenticatedUserId, is_current: true,
       });
-
-    if (uploadErr) {
-      console.error("Storage upload error:", uploadErr);
-      return new Response(JSON.stringify({ error: "Storage upload failed", details: uploadErr.message }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({
+        success: true, mode: "versioned_print", document_id,
+        version_number: nextVersion, pdf_url: `${bucket}:${versionPath}`,
+        note: `Version v${nextVersion} generada.`,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // 7. Update document record
-    const basePdfUrl = `${bucket}:${storagePath}`;
-    const { error: updateErr } = await supabaseAdmin
-      .from("documents")
-      .update({
-        base_pdf_url: basePdfUrl,
-        base_pdf_hash: hash,
-      })
-      .eq("id", document_id);
+    const path = `contracts/base/${doc.sale_id}/${doc.id}.pdf`;
+    await admin.storage.from(bucket).upload(path, pdf, { contentType: "application/pdf", upsert: true });
+    const url = `${bucket}:${path}`;
+    await admin.from("documents").update({ base_pdf_url: url, base_pdf_hash: hash }).eq("id", document_id);
+    return new Response(JSON.stringify({ success: true, document_id, mode: "base_pdf", base_pdf_url: url, base_pdf_hash: hash }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-    if (updateErr) {
-      console.error("Document update error:", updateErr);
-    }
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        document_id,
-        base_pdf_url: basePdfUrl,
-        base_pdf_hash: hash,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  } catch (err: unknown) {
-    console.error("generate-base-pdf error:", err);
-    return new Response(JSON.stringify({ error: (err as Error).message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+  } catch (e: unknown) {
+    console.error("generate-base-pdf error:", e);
+    return new Response(JSON.stringify({ error: (e as Error).message }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

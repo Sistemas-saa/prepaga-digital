@@ -12,6 +12,7 @@ import { useToast } from '@/hooks/use-toast';
 import { CheckCircle, XCircle, Clock, AlertCircle, MessageSquare, Edit, FileText } from 'lucide-react';
 import { SaleForm } from '@/components/SaleForm';
 import { formatCurrency } from '@/lib/utils';
+import { getClientDisplayName, getClientDocument, getClientDocumentLabel } from '@/lib/clientUtils';
 
 interface AuditSaleDetailsProps {
   sale: any;
@@ -102,7 +103,7 @@ export const AuditSaleDetails: React.FC<AuditSaleDetailsProps> = ({
             <div>
               <Label className="text-sm font-medium text-muted-foreground">Nombre</Label>
               <p className="text-sm font-medium">
-                {sale.clients ? `${sale.clients.first_name} ${sale.clients.last_name}` : 'No asignado'}
+                {sale.clients ? getClientDisplayName(sale.clients) : 'No asignado'}
               </p>
             </div>
             <div>
@@ -114,8 +115,8 @@ export const AuditSaleDetails: React.FC<AuditSaleDetailsProps> = ({
               <p className="text-sm">{sale.clients?.phone || 'No especificado'}</p>
             </div>
             <div>
-              <Label className="text-sm font-medium text-muted-foreground">C.I.</Label>
-              <p className="text-sm">{sale.clients?.dni || 'No especificado'}</p>
+              <Label className="text-sm font-medium text-muted-foreground">{getClientDocumentLabel(sale.clients)}</Label>
+              <p className="text-sm">{getClientDocument(sale.clients) || 'No especificado'}</p>
             </div>
           </CardContent>
         </Card>

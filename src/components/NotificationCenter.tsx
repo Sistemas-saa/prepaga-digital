@@ -59,6 +59,7 @@ const NotificationCenter = () => {
       case 'document_generated':
         return '📄';
       case 'reminder':
+      case 'contract_expiry':
         return '⏰';
       default:
         return 'ℹ️';
@@ -72,6 +73,9 @@ const NotificationCenter = () => {
         return 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800';
       case 'warning':
       case 'signature_pending':
+      // Aviso de vencimiento de vigencia (notify_expiring_sales). Sin este case
+      // caía en el default gris y se leía como una notificación informativa más.
+      case 'contract_expiry':
         return 'bg-yellow-50 border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800';
       case 'error':
         return 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800';

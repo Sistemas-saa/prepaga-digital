@@ -13,6 +13,8 @@ import { useBeneficiaries } from '@/hooks/useBeneficiaries';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { getClientDisplayName, getClientDocument, getClientDocumentLabel, isCompanyClient } from '@/lib/clientUtils';
+import { agruparNomina, aplanarNomina, ordenarNomina, tieneNomina, esEmpleado } from '@/lib/nomina';
 
 interface SaleDDJJTabProps {
   saleId?: string;
@@ -112,6 +114,9 @@ interface VirtualTitular {
   first_name: string;
   last_name: string;
   dni: string | null;
+  client_type?: string | null;
+  razon_social?: string | null;
+  ruc?: string | null;
   is_primary: boolean;
   relationship: string | null;
   has_preexisting_conditions: boolean | null;
@@ -139,7 +144,7 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
       if (!sale?.client_id) return null;
       const { data: client } = await supabase
         .from('clients')
-        .select('first_name, last_name, dni, birth_date, gender, marital_status, phone, email, address, city, province, postal_code')
+        .select('first_name, last_name, dni, client_type, razon_social, ruc, birth_date, gender, marital_status, phone, email, address, city, province, postal_code')
         .eq('id', sale.client_id)
         .single();
       return client ? { ...client, clientId: sale.client_id } : null;
@@ -152,9 +157,48 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
     return beneficiaries?.some(b => b.is_primary) ?? false;
   }, [beneficiaries]);
 
-  // Build the combined list: virtual titular (from client) if no is_primary exists, then adherents
-  const sortedBeneficiaries = useMemo(() => {
+  /**
+   * Una venta de EMPRESA no lleva DDJJ de la razón social: la salud la declara
+   * cada empleado de la nómina y cada uno de sus adherentes. El respaldo por
+   * `tieneNomina` cubre el instante en que `saleClient` todavía no cargó.
+   */
+  const esVentaEmpresa = useMemo(
+    () => isCompanyClient(saleClient) || tieneNomina(beneficiaries as any),
+    [saleClient, beneficiaries],
+  );
+
+  // Los pasos del asistente, cada uno con la etiqueta que lo identifica en el
+  // stepper. En empresa se recorre la nómina; en persona física, el titular
+  // (real o virtual, tomado del cliente) seguido de sus adherentes.
+  const pasos = useMemo<{ persona: any; etiqueta: string }[]>(() => {
     if (!beneficiaries) return [];
+
+    if (esVentaEmpresa) {
+      // `useBeneficiaries` trae DESCENDENTE por created_at y el agrupador
+      // conserva el orden de entrada, de ahí el `ordenarNomina`.
+      const agrupada = agruparNomina(ordenarNomina(beneficiaries as any));
+      const nombreDelEmpleado = new Map<string, string>();
+      for (const grupo of agrupada.empleados) {
+        nombreDelEmpleado.set(grupo.empleado.id, String(grupo.empleado.first_name || '').trim());
+      }
+
+      // `aplanarNomina` incluye los `sueltos`: una fila inconsistente se ve en
+      // vez de desaparecer, que es la regla de nomina.ts.
+      return aplanarNomina(agrupada).map((persona: any) => {
+        if (esEmpleado(persona)) {
+          return { persona, etiqueta: `Empleado: ${persona.first_name}` };
+        }
+        const padre = persona.parent_beneficiary_id
+          ? nombreDelEmpleado.get(persona.parent_beneficiary_id)
+          : undefined;
+        return {
+          persona,
+          etiqueta: padre
+            ? `Adh. de ${padre}: ${persona.first_name}`
+            : `${persona.relationship || 'Adherente'}: ${persona.first_name}`,
+        };
+      });
+    }
 
     const realBeneficiaries = [...beneficiaries].sort((a, b) => {
       if (a.is_primary && !b.is_primary) return -1;
@@ -163,12 +207,16 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
     });
 
     // If no primary beneficiary exists, prepend a virtual titular from the client
+    const personas: any[] = [...realBeneficiaries];
     if (!hasPrimaryBeneficiary && saleClient) {
       const virtualTitular: VirtualTitular = {
         id: 'virtual-titular',
-        first_name: saleClient.first_name,
+        first_name: getClientDisplayName(saleClient),
         last_name: saleClient.last_name,
-        dni: saleClient.dni,
+        dni: getClientDocument(saleClient),
+        client_type: (saleClient as any).client_type,
+        razon_social: (saleClient as any).razon_social,
+        ruc: (saleClient as any).ruc,
         is_primary: true,
         relationship: null,
         has_preexisting_conditions: null,
@@ -176,17 +224,27 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
         created_at: null,
         isVirtual: true,
       };
-      return [virtualTitular as any, ...realBeneficiaries];
+      personas.unshift(virtualTitular as any);
     }
 
-    return realBeneficiaries;
-  }, [beneficiaries, hasPrimaryBeneficiary, saleClient]);
+    return personas.map((persona, idx) => ({
+      persona,
+      etiqueta: persona.is_primary
+        ? `Titular: ${persona.first_name}`
+        : `${persona.relationship || `Adherente ${idx}`}: ${persona.first_name}`,
+    }));
+  }, [beneficiaries, esVentaEmpresa, hasPrimaryBeneficiary, saleClient]);
+
+  const sortedBeneficiaries = useMemo(() => pasos.map((p) => p.persona), [pasos]);
+
+  // En empresa no hay titular virtual: no existe un paso para la razón social.
+  const usaTitularVirtual = !esVentaEmpresa && !hasPrimaryBeneficiary && !!saleClient;
 
   // Initialize health data from DB
   useEffect(() => {
     if (!beneficiaries || beneficiaries.length === 0 || initialized) {
       // Also init virtual titular if needed
-      if (!initialized && !hasPrimaryBeneficiary && saleClient && !healthData['virtual-titular']) {
+      if (!initialized && usaTitularVirtual && !healthData['virtual-titular']) {
         setHealthData(prev => ({ ...prev, 'virtual-titular': createEmptyData() }));
       }
       if (beneficiaries && beneficiaries.length > 0 && !initialized) {
@@ -194,7 +252,7 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
         for (const b of beneficiaries) {
           initial[b.id] = parseExistingData(b.preexisting_conditions_detail, b.has_preexisting_conditions);
         }
-        if (!hasPrimaryBeneficiary && saleClient) {
+        if (usaTitularVirtual) {
           initial['virtual-titular'] = createEmptyData();
         }
         setHealthData(initial);
@@ -206,12 +264,12 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
     for (const b of beneficiaries) {
       initial[b.id] = parseExistingData(b.preexisting_conditions_detail, b.has_preexisting_conditions);
     }
-    if (!hasPrimaryBeneficiary && saleClient) {
+    if (usaTitularVirtual) {
       initial['virtual-titular'] = createEmptyData();
     }
     setHealthData(initial);
     setInitialized(true);
-  }, [beneficiaries, initialized, hasPrimaryBeneficiary, saleClient]);
+  }, [beneficiaries, initialized, usaTitularVirtual]);
 
   // Reset initialized when saleId changes
   useEffect(() => {
@@ -282,14 +340,23 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
       // If this is a virtual titular, create the beneficiary first
       if (beneficiaryId === 'virtual-titular') {
         if (!saleClient || !saleId) throw new Error('No se encontró el cliente de la venta');
+        // La razón social no es beneficiaria de sí misma: crear esa fila
+        // ensuciaría la nómina y la sumaría al total del contrato. El paso ni
+        // siquiera se muestra en empresa; esto cubre una carrera de carga.
+        if (esVentaEmpresa) {
+          throw new Error(
+            'Una venta de empresa no lleva DDJJ de la razón social: complete la de cada empleado de la nómina.',
+          );
+        }
 
         const { data: newBeneficiary, error: createError } = await supabase
           .from('beneficiaries')
           .insert({
             sale_id: saleId,
-            first_name: saleClient.first_name,
-            last_name: saleClient.last_name,
-            dni: saleClient.dni,
+            first_name: getClientDisplayName(saleClient),
+            last_name: isCompanyClient(saleClient) ? '' : saleClient.last_name,
+            dni: getClientDocument(saleClient),
+            document_number: getClientDocument(saleClient),
             birth_date: saleClient.birth_date,
             gender: (saleClient as any).gender ?? null,
             marital_status: (saleClient as any).marital_status ?? null,
@@ -300,7 +367,10 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
             province: saleClient.province,
             postal_code: saleClient.postal_code,
             is_primary: true,
-            relationship: 'Titular',
+            // El titular ya está referenciado por sales.client_id; no crear
+            // un beneficiario con relationship='Titular' porque generaría un
+            // enlace de firma de adherente fantasma.
+            relationship: null,
             has_preexisting_conditions: hasPreexisting,
             preexisting_conditions_detail: detailParts.length > 0 ? detailParts.join('; ') : null,
           })
@@ -356,9 +426,13 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
       // Invalidate queries to refetch beneficiaries
       queryClient.invalidateQueries({ queryKey: ['beneficiaries'] });
 
-      // Sync DDJJ answers to template_responses for template engine interpolation
+      // Sync DDJJ answers to template_responses for template engine interpolation.
+      // En empresa NO se sincroniza: `template_responses` es por VENTA, así que
+      // con varios empleados cada guardado pisaría al anterior. Su único
+      // consumidor era la DDJJ a nivel venta, que en empresa ya no se emite; las
+      // DDJJ por persona se arman desde `preexisting_conditions_detail`.
       try {
-        if (saleId) {
+        if (saleId && !esVentaEmpresa) {
           const { data: saleTemplateRows } = await supabase
             .from('sale_templates')
             .select('template_id, templates:template_id(name)')
@@ -447,7 +521,9 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
     return (
       <div className="text-center py-8 text-muted-foreground">
         <Clock className="h-8 w-8 mx-auto mb-2" />
-        No se encontró un cliente asociado a esta venta. Seleccione un cliente en la pestaña Básico.
+        {esVentaEmpresa
+          ? 'La nómina está vacía. Cargue los empleados en la pestaña Nómina: la DDJJ de salud la completa cada uno de ellos, no la empresa.'
+          : 'No se encontró un cliente asociado a esta venta. Seleccione un cliente en la pestaña Básico.'}
       </div>
     );
   }
@@ -467,12 +543,14 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
         <h3 className="text-lg font-semibold">Declaración Jurada de Salud - SAMAP</h3>
       </div>
       <p className="text-sm text-muted-foreground">
-        Complete la DDJJ de salud de forma secuencial. Primero el titular, luego cada adherente.
+        {esVentaEmpresa
+          ? 'Complete la DDJJ de salud de forma secuencial: cada empleado de la nómina y sus adherentes. La empresa no declara salud.'
+          : 'Complete la DDJJ de salud de forma secuencial. Primero el titular, luego cada adherente.'}
       </p>
 
       {/* Progress stepper */}
       <div className="flex items-center gap-2 flex-wrap">
-        {sortedBeneficiaries.map((b: any, idx: number) => {
+        {pasos.map(({ persona: b, etiqueta }, idx: number) => {
           const completed = isComplete(b.id);
           const isCurrent = idx === currentStep;
           const isLocked = idx > 0 && !isComplete(sortedBeneficiaries[idx - 1].id);
@@ -492,7 +570,7 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
               }`}
             >
               {completed && <CheckCircle className="h-3 w-3" />}
-              {b.is_primary ? 'Titular' : b.relationship || `Adherente ${idx}`}: {b.first_name}
+              {etiqueta}
             </button>
           );
         })}
@@ -513,8 +591,18 @@ const SaleDDJJTab: React.FC<SaleDDJJTabProps> = ({ saleId }) => {
                   {currentBeneficiary.first_name} {currentBeneficiary.last_name}
                 </CardTitle>
                 <p className="text-sm text-muted-foreground">
-                  {currentBeneficiary.is_primary ? 'Titular' : currentBeneficiary.relationship || 'Adherente'}{' '}
-                  {currentBeneficiary.dni ? `• C.I.: ${currentBeneficiary.dni}` : ''}
+                  {esVentaEmpresa && esEmpleado(currentBeneficiary)
+                    ? `Empleado${currentBeneficiary.relationship ? ` • ${currentBeneficiary.relationship}` : ''}`
+                    : currentBeneficiary.is_primary
+                      ? 'Titular'
+                      : currentBeneficiary.relationship || 'Adherente'}{' '}
+                  {(() => {
+                    const documentClient = currentBeneficiary.is_primary ? (saleClient || currentBeneficiary) : currentBeneficiary;
+                    const document = currentBeneficiary.is_primary
+                      ? getClientDocument(documentClient)
+                      : currentBeneficiary.dni;
+                    return document ? `• ${currentBeneficiary.is_primary ? getClientDocumentLabel(documentClient) : 'C.I.'}: ${document}` : '';
+                  })()}
                   {' '}— Paso {currentStep + 1} de {sortedBeneficiaries.length}
                 </p>
               </div>

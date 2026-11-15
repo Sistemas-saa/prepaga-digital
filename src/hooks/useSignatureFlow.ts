@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useCreateSignature, useCompleteSignature } from '@/hooks/useSignature';
+import { getClientDisplayName, getClientDocument, getClientDocumentLabel } from '@/lib/clientUtils';
 
 export const useSignatureFlow = () => {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -160,10 +161,10 @@ export const useSignatureFlow = () => {
 
         <div class="client-info">
           <h2>Información del Cliente</h2>
-          <p><strong>Nombre:</strong> ${data.client?.first_name} ${data.client?.last_name}</p>
+          <p><strong>Nombre:</strong> ${getClientDisplayName(data.client)}</p>
           <p><strong>Email:</strong> ${data.client?.email}</p>
           <p><strong>Teléfono:</strong> ${data.client?.phone || 'N/A'}</p>
-          <p><strong>C.I.:</strong> ${data.client?.dni || 'N/A'}</p>
+          <p><strong>${getClientDocumentLabel(data.client)}:</strong> ${getClientDocument(data.client) || 'N/A'}</p>
         </div>
 
         <div class="plan-info">

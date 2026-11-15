@@ -10,7 +10,7 @@ export const useSale = (saleId: string) => {
         .from('sales')
         .select(`
           *,
-          clients:client_id(first_name, last_name, email, phone, dni),
+          clients:client_id(first_name, last_name, email, phone, dni, client_type, razon_social, ruc),
           plans:plan_id(name, price, description, coverage_details),
           companies:company_id(name),
           templates:template_id(name, description)
@@ -39,6 +39,10 @@ export const useSale = (saleId: string) => {
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: true,
+    // Al (re)entrar a la venta siempre revalidamos: se pinta la cache al instante y se refresca
+    // en segundo plano. Sin esto, el staleTime de 5 min podia dejar la pantalla Editar Venta con
+    // un audit_status viejo y bloquear la pestana Templates aunque auditoria ya hubiera aprobado.
+    refetchOnMount: 'always',
   });
 
   return query;

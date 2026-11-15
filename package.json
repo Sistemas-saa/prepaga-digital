@@ -8,12 +8,16 @@
     "dev:us": "vite --mode us",
     "dev:br": "vite --mode br",
     "build": "vite build",
-    "build:us": "vite build --mode us",
+    "build:us": "vite build --mode us && node scripts/verify-us-bundle.mjs",
     "build:br": "vite build --mode br",
     "build:dev": "vite build --mode development",
+    "commission:db:dry-run:us": "node scripts/commission-us-guard.mjs",
+    "commission:db:push:us": "node scripts/commission-us-guard.mjs --apply",
+    "commission:function:deploy:us": "npx supabase@2.111.0 functions deploy generate-commission-pdf --project-ref ykducvvcjzdpoojxlsig --no-verify-jwt",
     "deploy:test": "bash scripts/deploy-test.sh",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:engine": "node scripts/test-engine.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.2",
@@ -87,6 +91,7 @@
     "docx-preview": "^0.3.7",
     "dompurify": "^3.3.1",
     "embla-carousel-react": "^8.3.0",
+    "exceljs": "^4.4.0",
     "input-otp": "^1.2.4",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.462.0",

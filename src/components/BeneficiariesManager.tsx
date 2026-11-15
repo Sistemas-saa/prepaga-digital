@@ -11,12 +11,22 @@ import { BeneficiaryForm, BeneficiaryFormData } from '@/components/beneficiaries
 import { BeneficiaryDocuments } from '@/components/beneficiaries/BeneficiaryDocuments';
 import { useCurrencySettings } from '@/hooks/useCurrencySettings';
 import { formatDateOnly } from '@/lib/dateOnly';
+import { useSaleClientType } from '@/hooks/useSaleClientType';
 
 interface BeneficiariesManagerProps {
   saleId: string;
+  /**
+   * `false` cuando el contrato ya está firmado: los adherentes pasan a sólo
+   * lectura. Se calcula con `canMutateBeneficiaries` (src/lib/saleUtils.ts) y no
+   * tiene excepciones por rol.
+   *
+   * Esto es sólo la capa visual; el bloqueo real está en `useBeneficiaries` y en
+   * un trigger de la base, porque esconder botones nunca alcanzó.
+   */
+  canMutate?: boolean;
 }
 
-export const BeneficiariesManager: React.FC<BeneficiariesManagerProps> = ({ saleId }) => {
+export const BeneficiariesManager: React.FC<BeneficiariesManagerProps> = ({ saleId, canMutate = true }) => {
   const [showForm, setShowForm] = useState(false);
   const [editingBeneficiary, setEditingBeneficiary] = useState<any>(null);
   const [expandedBeneficiary, setExpandedBeneficiary] = useState<string | null>(null);
@@ -26,6 +36,7 @@ export const BeneficiariesManager: React.FC<BeneficiariesManagerProps> = ({ sale
   const updateBeneficiary = useUpdateBeneficiary();
   const deleteBeneficiary = useDeleteBeneficiary();
   const { formatCurrency } = useCurrencySettings();
+  const { isCompany } = useSaleClientType(saleId);
 
   // Filter out the titular — only show adherentes
   const beneficiaries = allBeneficiaries.filter(
@@ -120,14 +131,27 @@ export const BeneficiariesManager: React.FC<BeneficiariesManagerProps> = ({ sale
               Gestiona los adherentes del titular ({beneficiaries.length} registrados)
             </CardDescription>
           </div>
-          <Button onClick={() => setShowForm(true)} disabled={showForm}>
-            <Plus className="h-4 w-4 mr-2" />
-            Agregar Beneficiario
-          </Button>
+          {canMutate && (
+            <Button onClick={() => setShowForm(true)} disabled={showForm}>
+              <Plus className="h-4 w-4 mr-2" />
+              Agregar Beneficiario
+            </Button>
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {showForm && (
+        {!canMutate && (
+          <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-800">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <p>
+              El contrato ya está firmado, así que los adherentes son de sólo lectura.
+              Para sumar a alguien usá una <strong>Incorporación de Adherente</strong>,
+              que genera su propio anexo y su firma.
+            </p>
+          </div>
+        )}
+
+        {showForm && canMutate && (
           <div className="border p-4 rounded-lg bg-muted/50">
             <h3 className="font-semibold mb-4">
               {editingBeneficiary ? 'Editar' : 'Nuevo'} Beneficiario
@@ -138,6 +162,7 @@ export const BeneficiariesManager: React.FC<BeneficiariesManagerProps> = ({ sale
               onCancel={handleCancel}
               isSubmitting={createBeneficiary.isPending || updateBeneficiary.isPending}
               isEditing={!!editingBeneficiary}
+              isCompany={isCompany}
             />
           </div>
         )}
@@ -194,22 +219,24 @@ export const BeneficiariesManager: React.FC<BeneficiariesManagerProps> = ({ sale
                         <span className="font-medium">
                           {formatCurrency(beneficiary.amount || 0)}
                         </span>
-                        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEdit(beneficiary)}
-                          >
-                            <Edit2 className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(beneficiary.id)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
+                        {canMutate && (
+                          <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEdit(beneficiary)}
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDelete(beneficiary.id)}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </CollapsibleTrigger>

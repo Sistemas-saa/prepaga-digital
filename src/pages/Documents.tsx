@@ -49,6 +49,18 @@ const normalizeDocumentType = (document: {
     return "ddjj_salud";
   }
 
+  // Los 3 anexos nuevos se guardan con document_type='contrato' porque tienen
+  // {{firma_contratante}}, y eso NO se toca: finalize-signature-link saltea los
+  // 'anexo' y nunca les generaría el PDF. La distinción acá es sólo de etiqueta,
+  // por eso va por NOMBRE y antes de la rama de contrato.
+  if (
+    rawName.includes("anexo de incorporacion") ||
+    rawName.includes("solicitud de cambio de plan") ||
+    rawName.includes("vigencia inmediata")
+  ) {
+    return "anexo";
+  }
+
   if (
     rawType === "contrato" ||
     rawType === "contract" ||

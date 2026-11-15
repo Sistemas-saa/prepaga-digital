@@ -12,7 +12,7 @@ export const useAuditProcesses = () => {
         .from('sales')
         .select(`
           *,
-          clients:client_id(first_name, last_name, email, phone, dni),
+          clients:client_id(first_name, last_name, email, phone, dni, client_type, razon_social, ruc),
           plans:plan_id(name, price),
           beneficiaries(*),
           salesperson:user_id(first_name, last_name)

@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { format, startOfMonth, endOfMonth, subMonths, subDays, startOfYear, isWithinInterval } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useSimpleAuthContext } from '@/components/SimpleAuthProvider';
+import { excludeIncorporationSales } from '@/lib/saleFilters';
 
 const ADMIN_ROLES = ['super_admin', 'admin', 'supervisor', 'gestor', 'auditor'];
 
@@ -99,6 +100,9 @@ export const useAdvancedAnalytics = (dateRange: DateRange, filters: AnalyticsFil
         `)
         .gte('created_at', dateRange.from.toISOString())
         .lte('created_at', dateRange.to.toISOString());
+
+      // Las operaciones de incorporación de adherente no cuentan como ventas.
+      salesQuery = excludeIncorporationSales(salesQuery);
 
       // Role-based scoping: vendedores only see their own sales
       if (!isAdminRole && user?.id) {

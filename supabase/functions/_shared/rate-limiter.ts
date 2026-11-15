@@ -4,7 +4,7 @@
  * for critical endpoints so limits survive cold starts.
  */
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.0'
 
 const requestCounts = new Map<string, { count: number; windowStart: number }>();
 

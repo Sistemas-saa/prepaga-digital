@@ -1,5 +1,6 @@
 
 import { PDFDocument } from '@/lib/pdfGenerator';
+import { getClientDisplayName, getClientDocument, getClientDocumentLabel } from '@/lib/clientUtils';
 
 export interface EnhancedPDFDocument extends PDFDocument {
   template: {
@@ -38,7 +39,7 @@ export const generateEnhancedPDFContent = (document: EnhancedPDFDocument): strin
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Declaración Jurada de Salud - ${client.first_name} ${client.last_name}</title>
+    <title>Declaración Jurada de Salud - ${getClientDisplayName(client)}</title>
     <style>
         @page {
             size: A4;
@@ -297,8 +298,8 @@ export const generateEnhancedPDFContent = (document: EnhancedPDFDocument): strin
         <div class="section-title">INFORMACIÓN DEL TITULAR</div>
         <table class="info-table">
             <tr>
-                <td><strong>Titular/CI:</strong></td>
-                <td>${client.first_name} ${client.last_name} - ${client.dni || 'N/A'}</td>
+                <td><strong>Titular/${getClientDocumentLabel(client)}:</strong></td>
+                <td>${getClientDisplayName(client)} - ${getClientDocument(client) || 'N/A'}</td>
                 <td><strong>Peso:</strong></td>
                 <td>${medical_declaration?.bmi ? '70.0' : 'N/A'}</td>
                 <td><strong>Altura:</strong></td>

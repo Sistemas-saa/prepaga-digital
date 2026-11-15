@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { formatDateOnly } from '@/lib/dateOnly';
+import { getClientDisplayName, getClientDocument, getClientDocumentLabel } from '@/lib/clientUtils';
 
 interface ClientDetailsProps {
   clientId: string;
@@ -43,11 +44,11 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="text-sm font-medium text-muted-foreground">Nombre</label>
-            <p className="text-sm">{client.first_name} {client.last_name}</p>
+            <p className="text-sm">{getClientDisplayName(client)}</p>
           </div>
           <div>
-            <label className="text-sm font-medium text-muted-foreground">C.I.</label>
-            <p className="text-sm">{client.dni || 'No proporcionado'}</p>
+            <label className="text-sm font-medium text-muted-foreground">{getClientDocumentLabel(client)}</label>
+            <p className="text-sm">{getClientDocument(client) || 'No proporcionado'}</p>
           </div>
           <div>
             <label className="text-sm font-medium text-muted-foreground">Email</label>

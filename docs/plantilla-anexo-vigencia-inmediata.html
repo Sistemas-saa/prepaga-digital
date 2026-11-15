@@ -1,0 +1,86 @@
+<!--
+  PLANTILLA: "Anexo Especial de Vigencia Inmediata"
+
+  CÓMO USARLA
+  Crear una plantilla nueva en el diseñador con este nombre y pegar este HTML.
+  El encabezado y el zócalo con el logo de SAMAP los agrega automáticamente
+  generate-base-pdf, así que NO van acá.
+
+  IMPORTANTE — que sea FIRMABLE
+  La plantilla incluye {{firma_contratante}} y {{firma_contratada}}. Esos campos
+  son los que hacen que el documento se clasifique como firmable. Si se los saca,
+  el anexo se generaría como adjunto y nunca se enviaría a firmar.
+
+  QUIÉNES SALEN EN LA TABLA
+  El bloque {{#beneficiarios_vi}} ... {{/beneficiarios_vi}} se repite una vez por
+  cada persona con VIGENCIA INMEDIATA EFECTIVA. "Efectiva" quiere decir: manda el
+  valor del adherente y, si no tiene uno propio, hereda el de la venta. El titular
+  aparece cuando la venta tiene vigencia inmediata. No hay que dejar 8 filas
+  vacías como en el papel: salen exactamente las personas que corresponden.
+-->
+
+<div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#111;">
+
+  <h2 style="text-align:center;font-size:15px;margin:0 0 18px 0;">
+    ANEXO ESPECIAL DE VIGENCIA INMEDIATA
+  </h2>
+
+  <p style="margin:0 0 12px 0;text-align:justify;">
+    Este anexo forma parte integrante del contrato nº {{venta.numeroContrato}} entre
+    SAMAP Departamento de Medicina Pre paga del Sanatorio Adventista de Asunción, y
+    {{titular_nombre}} (Titular), por el cual SAMAP otorga vigencia inmediata para
+    estudios laboratoriales, estudios especializados, e Internaciones agudas
+    (clínicas) según los anexos del plan elegido.
+  </p>
+
+  <p style="margin:0 0 8px 0;">
+    Los beneficiarios del presente anexo, son las siguientes personas:
+  </p>
+
+  <table style="width:100%;border-collapse:collapse;font-size:11px;">
+    <thead>
+      <tr>
+        <th style="border:1px solid #000;padding:4px;width:40px;">Nº</th>
+        <th style="border:1px solid #000;padding:4px;">Nombre y Apellido</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#beneficiarios_vi}}
+      <tr>
+        <td style="border:1px solid #000;padding:4px;text-align:center;">{{indice}}</td>
+        <td style="border:1px solid #000;padding:4px;">{{nombreCompleto}}</td>
+      </tr>
+      {{/beneficiarios_vi}}
+    </tbody>
+  </table>
+
+  <p style="margin:16px 0 0 0;text-align:justify;">
+    Vigencia inmediata no contempla internación o procedimientos por enfermedad o
+    embarazo preexistente a la firma del contrato, sean éstas conocidas o no por el
+    beneficiario.
+  </p>
+
+  <p style="margin:12px 0 0 0;text-align:justify;">
+    En prueba de conformidad, firman las partes en dos ejemplares de un mismo tenor
+    y a un solo efecto.
+  </p>
+
+  <p style="margin:10px 0 0 0;">
+    Asunción, {{fecha.dia}} / {{fecha.mes}} / {{fecha.anio}}
+  </p>
+
+  <table style="width:100%;margin-top:55px;border-collapse:collapse;text-align:center;">
+    <tr>
+      <td style="width:50%;vertical-align:bottom;">
+        {{firma_contratante}}
+        <div style="border-top:1px solid #555;margin-top:36px;padding-top:4px;">CONTRATANTE</div>
+        <div style="font-size:10px;">C. I. Nº {{titular_ci}}</div>
+      </td>
+      <td style="width:50%;vertical-align:bottom;">
+        {{firma_contratada}}
+        <div style="border-top:1px solid #555;margin-top:36px;padding-top:4px;">CONTRATADA</div>
+      </td>
+    </tr>
+  </table>
+
+</div>

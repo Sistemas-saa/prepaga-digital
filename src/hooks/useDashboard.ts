@@ -2,6 +2,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useSimpleAuthContext } from '@/components/SimpleAuthProvider';
+import { excludeIncorporationSales } from '@/lib/saleFilters';
 
 const ADMIN_ROLES = ['super_admin', 'admin', 'supervisor', 'gestor'];
 
@@ -25,6 +26,9 @@ export const useDashboardStats = () => {
             .from('sales')
             .select('id', { count: 'exact', head: true });
 
+          // Las incorporaciones de adherente no son ventas: no se cuentan.
+          query = excludeIncorporationSales(query);
+
           if (salespersonFilter) {
             query = query.eq('salesperson_id', salespersonFilter.salesperson_id);
           }
@@ -41,23 +45,23 @@ export const useDashboardStats = () => {
           return query;
         };
 
-        let salesRevenueQuery = supabase
+        let salesRevenueQuery = excludeIncorporationSales(supabase
           .from('sales')
-          .select('total_amount');
+          .select('total_amount'));
 
-        let recentSalesQuery = supabase
+        let recentSalesQuery = excludeIncorporationSales(supabase
           .from('sales')
           .select(`
             id,
             total_amount,
             status,
             created_at,
-            clients:client_id(first_name, last_name),
+            clients:client_id(first_name, last_name, client_type, razon_social, ruc, dni),
             plans:plan_id(name),
             companies:company_id(name)
           `)
           .order('created_at', { ascending: false })
-          .limit(5);
+          .limit(5));
 
         let recentClientsQuery = supabase
           .from('clients')
@@ -72,11 +76,11 @@ export const useDashboardStats = () => {
 
         const clientCountQuery = isAdminRole
           ? supabase.from('clients').select('id', { count: 'exact', head: true })
-          : supabase
+          : excludeIncorporationSales(supabase
               .from('sales')
               .select('client_id')
               .eq('salesperson_id', user!.id)
-              .not('client_id', 'is', null);
+              .not('client_id', 'is', null));
 
         const [
           usersResult,

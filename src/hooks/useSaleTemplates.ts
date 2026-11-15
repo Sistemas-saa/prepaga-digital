@@ -7,6 +7,10 @@ type SaleTemplate = Tables<"sale_templates">;
 type SaleTemplateInsert = TablesInsert<"sale_templates">;
 type SaleTemplateUpdate = TablesUpdate<"sale_templates">;
 
+// OJO: `templates` NO tiene `static_content` ni `dynamic_fields`. Este select
+// las pedía y devolvía 42703 (column does not exist) apenas alguien usara el
+// hook; no reventaba sólo porque hoy no lo consume nadie (SaleTemplatesTab
+// tiene su propia query inline). El contenido de la plantilla está en `content`.
 export const useSaleTemplates = (saleId?: string) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -25,8 +29,7 @@ export const useSaleTemplates = (saleId?: string) => {
             name,
             template_type,
             description,
-            static_content,
-            dynamic_fields
+            content
           )
         `)
         .eq("sale_id", saleId)

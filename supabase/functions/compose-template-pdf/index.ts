@@ -1,6 +1,23 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
+// --- Inlined: _shared/client-document.ts ---
+// COPIA de supabase/functions/_shared/client-document.ts (Deno no importa de src/).
+// Si cambia una, cambiar la otra: el PDF del cliente y el del servidor deben coincidir.
+// Una EMPRESA guarda la razon social tambien en first_name (espejo), pero el RUC
+// NO se copia a dni: sin esto el PDF sale sin documento del titular.
+const isCompanyClient = (c: any): boolean => c?.client_type === 'empresa';
+const getClientDisplayName = (c: any): string => {
+  if (!c) return '';
+  if (isCompanyClient(c) && c.razon_social) return String(c.razon_social).trim();
+  return `${c.first_name || ''} ${c.last_name || ''}`.trim();
+};
+const getClientDocument = (c: any): string => {
+  if (!c) return '';
+  return (isCompanyClient(c) ? c.ruc : c.dni) || '';
+};
+const getClientDocumentLabel = (c: any): string => (isCompanyClient(c) ? 'RUC' : 'C.I.');
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -339,8 +356,13 @@ function flattenSaleData(sale: any): Record<string, string> {
   if (client) {
     result["client_first_name"] = client.first_name || "";
     result["client_last_name"] = client.last_name || "";
-    result["client_full_name"] = `${client.first_name || ""} ${client.last_name || ""}`.trim();
-    result["client_dni"] = client.dni || "";
+    result["client_full_name"] = getClientDisplayName(client);
+    // Para una EMPRESA el documento es el RUC, no el dni.
+    result["client_dni"] = getClientDocument(client);
+    result["client_document"] = getClientDocument(client);
+    result["client_document_label"] = getClientDocumentLabel(client);
+    result["client_ruc"] = isCompanyClient(client) ? (client.ruc || "") : "";
+    result["client_razon_social"] = isCompanyClient(client) ? (client.razon_social || "") : "";
     result["client_email"] = client.email || "";
     result["client_phone"] = client.phone || "";
     result["client_address"] = client.address || "";

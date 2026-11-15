@@ -17,6 +17,7 @@ import { SaleWorkflowSteps } from '@/components/SaleWorkflowSteps';
 import { Loader2, FileText, User, Users, MessageSquare, PenTool, Package, ClipboardCheck, LayoutDashboard, ListOrdered, ArrowLeft } from 'lucide-react';
 import { useStateTransition } from '@/hooks/useStateTransition';
 import { useRolePermissions } from '@/hooks/useRolePermissions';
+import { canMutateBeneficiaries } from '@/lib/saleUtils';
 import type { SaleStatus } from '@/types/workflow';
 
 export default function SaleDetail() {
@@ -153,7 +154,7 @@ export default function SaleDetail() {
           </TabsContent>
 
           <TabsContent value="beneficiaries">
-            <BeneficiariesManager saleId={id!} />
+            <BeneficiariesManager saleId={id!} canMutate={canMutateBeneficiaries(sale)} />
           </TabsContent>
 
           <TabsContent value="documents">

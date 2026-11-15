@@ -15,6 +15,7 @@ import {
   BarChart3,
   Settings,
   AlertCircle,
+  HandCoins,
 } from "lucide-react";
 
 import {
@@ -118,6 +119,16 @@ export function AppSidebar() {
       icon: BarChart3,
       visible: permissions.canViewAnalytics,
       routeKey: 'analytics',
+    },
+    {
+      title: "Comisiones",
+      url: "/comisiones",
+      icon: HandCoins,
+      // El acceso operativo sigue bloqueado en la página hasta que exista una
+      // configuración activa; mantener el ítem visible evita que el módulo
+      // parezca ausente mientras se completa esa configuración.
+      visible: permissions.canViewCommissions,
+      routeKey: 'commissions',
     },
     {
       title: "Incidencias",

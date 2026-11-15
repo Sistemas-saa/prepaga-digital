@@ -1,0 +1,19 @@
+# Stack del AMBIENTE DE PRUEBAS (Supabase US test).
+#
+# Uso:  docker compose -f docker-compose.test.yml up -d --build
+#
+# Difiere a propósito del docker-compose.yml de producción en tres cosas, para
+# que ambos puedan convivir en el mismo host sin pisarse:
+#   - dockerfile: Dockerfile.us  (build:us + verificación del bundle)
+#   - container_name: prepaga-web-test
+#   - puerto 8081 (prod usa 8080)
+services:
+  prepaga-web-test:
+    container_name: prepaga-web-test
+    build:
+      context: .
+      dockerfile: Dockerfile.us
+    pull_policy: build
+    ports:
+      - "8081:80"
+    restart: unless-stopped

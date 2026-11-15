@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@supabase/supabase-js';
 import { useToast } from '@/hooks/use-toast';
 import type { Database } from '@/integrations/supabase/types';
+import { getClientDisplayName, getClientDocument, getClientDocumentLabel } from '@/lib/clientUtils';
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').trim();
 const SUPABASE_PUBLISHABLE_KEY = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '').trim();
@@ -57,6 +58,9 @@ interface SignatureLinkData {
       email: string | null;
       phone: string | null;
       dni: string | null;
+      client_type?: string | null;
+      razon_social?: string | null;
+      ruc?: string | null;
     } | null;
     plans: {
       name: string;
@@ -122,7 +126,10 @@ export const useSignatureLinkByToken = (token: string) => {
             last_name,
             email,
             phone,
-            dni
+            dni,
+            client_type,
+            razon_social,
+            ruc
           ),
           plans:plan_id (
             name,
@@ -381,7 +388,43 @@ export const useSubmitSignatureLink = () => {
             // contrato final legítimo (Contrato de prestación + Plan Materno, ver 4a5479b),
             // así que la firma de la contratada se fusiona en TODOS los que tengan la firma
             // del titular, no en uno solo.
-            const titularDocs = conFirmaTitular;
+            let titularDocs = conFirmaTitular;
+
+            // FALLBACK para documentos LEGADOS sin el marcador `data-signer`.
+            // La firma manuscrita (canvas) NO escribía `data-signer="titular"` en el bloque que
+            // insertaba, así que en esas ventas el filtro de arriba daba 0 y la contratada
+            // quedaba bloqueada por el invariante de más abajo. Acá reconocemos la firma del
+            // titular por su rastro en el HTML, descartando el documento ORIGEN: ese figura con
+            // signed_at/signature_data seteados (por el update de más abajo) pero su HTML sigue
+            // siendo la plantilla con los placeholders sin reemplazar.
+            const pareceFirmadoPorTitular = (html: string): boolean => {
+              if (html.includes('data-signer="contratada"')) return false; // contrato ya cerrado
+              if (/\{\{\s*firma_(contratante|titular|adherente)\s*\}\}/i.test(html)) return false; // sin firmar
+              // Sólo rastros de una firma REAL. "Pendiente firma de la empresa" NO sirve como
+              // evidencia (lo pone el flujo del titular, pero también quedaría en un contrato sin
+              // firmar) y no agrega cobertura: canvas siempre deja data:image y la electrónica
+              // siempre deja "Firmado electrónicamente por".
+              return html.includes('data:image') || html.includes('Firmado electrónicamente por');
+            };
+
+            if (titularDocs.length === 0) {
+              // `contratoDocs` viene ordenado created_at DESC: nos quedamos con el más reciente
+              // de cada `name` (con Plan Materno hay 2 contratos legítimos, ver 4a5479b) para no
+              // fusionar sobre copias viejas del mismo documento.
+              const porNombre = new Map<string, any>();
+              for (const d of contratoDocs || []) {
+                if (typeof d.content !== 'string' || !pareceFirmadoPorTitular(d.content)) continue;
+                const key = (d as any).name || '';
+                if (!porNombre.has(key)) porNombre.set(key, d);
+              }
+              titularDocs = Array.from(porNombre.values());
+              if (titularDocs.length > 0) {
+                console.warn(
+                  '[firma][contratada] contrato(s) del titular sin marcador data-signer (documento legado); se detectó la firma por contenido.',
+                  { ids: titularDocs.map((d: any) => d.id) }
+                );
+              }
+            }
 
             if (titularDocs.length > 0) {
               const nowIso = new Date().toISOString();
@@ -433,6 +476,10 @@ export const useSubmitSignatureLink = () => {
                 `;
               }
 
+              // Variante sin ancho fijo: cuando el hueco es un placeholder mustache, ya vive
+              // dentro de su propia columna de la plantilla y un width:48% lo dejaría a la mitad.
+              const contratadaBlockSinAncho = contratadaBlock.replace('width:48%;', '');
+
               // Fusionar la firma de la contratada en CADA contrato final de la venta.
               // Antes se tomaba solo el más reciente (.limit(1)); con más de un documento
               // tipo "contrato" (ej. Contrato de prestación + Plan Materno) uno quedaba sin firmar.
@@ -474,6 +521,17 @@ export const useSubmitSignatureLink = () => {
                 }
               }
 
+              // Plantillas mustache (ej. Plan Materno): el hueco de la contratada es el literal
+              // {{firma_contratada}}. Sin esto el bloque se appendeaba al final del HTML y el PDF
+              // salía con el placeholder impreso.
+              if (!mergeSuccess && /\{\{\s*firma_(contratada|empresa)\s*\}\}/i.test(finalContent)) {
+                finalContent = finalContent.replace(
+                  /\{\{\s*firma_(contratada|empresa)\s*\}\}/gi,
+                  contratadaBlockSinAncho
+                );
+                mergeSuccess = true;
+              }
+
               if (!mergeSuccess) {
                 // Fallback: append contratada signature block
                 finalContent += contratadaBlock;
@@ -484,7 +542,12 @@ export const useSubmitSignatureLink = () => {
               // titularDoc ya no filtra por is_final, así que puede venir con false/null.
               // Si quedara así, `finalize-signature-link` (que consulta is_final = true) no le
               // genera el PDF ni lo firma con PAdES y el contrato correcto queda invisible.
-              await signatureClient
+              // El error NO puede ignorarse: si este update falla (p. ej. el índice único
+              // uq_documents_contrato_final_por_venta porque ya hay otra fila is_final=true con
+              // el mismo name), supabase-js devuelve { error } sin lanzar y el contrato quedaría
+              // sin mergear EN SILENCIO con contratadaMergedOk = true. Lanzamos para caer en el
+              // invariante, que revierte el link y muestra el error.
+              const { error: mergeUpdateError } = await signatureClient
                 .from('documents')
                 .update({
                   content: finalContent,
@@ -494,6 +557,7 @@ export const useSubmitSignatureLink = () => {
                   status: 'firmado' as any,
                 } as any)
                 .eq('id', titularDoc.id);
+              if (mergeUpdateError) throw mergeUpdateError;
               } // fin del loop sobre los contratos finales
 
               // Update original doc status
@@ -636,7 +700,7 @@ export const useSubmitSignatureLink = () => {
           try {
             const { data: saleInfo } = await signatureClient
               .from('sales')
-              .select('company_id, signer_type, signer_name, signer_dni, signer_phone, signer_email, signer_relationship, companies:company_id(name, tax_id, address, phone, email), clients:client_id(first_name, last_name, dni, birth_date), beneficiaries(id, first_name, last_name, dni, birth_date)')
+              .select('company_id, signer_type, signer_name, signer_dni, signer_phone, signer_email, signer_relationship, companies:company_id(name, tax_id, address, phone, email), clients:client_id(first_name, last_name, dni, client_type, razon_social, ruc, birth_date), beneficiaries(id, first_name, last_name, dni, birth_date)')
               .eq('id', data.sale_id)
               .single();
             companyInfo = (saleInfo as any)?.companies || null;
@@ -730,6 +794,12 @@ export const useSubmitSignatureLink = () => {
             let signatureBlock: string;
             let signatureImgWithDate: string;
 
+            // Marcador del firmante. VA EN LAS DOS RAMAS (electrónica y canvas): el merge de la
+            // contratada busca `data-signer="titular"` para no pisar la firma del cliente. Si la
+            // rama canvas lo omite, la contratada queda bloqueada por el invariante de arriba.
+            const signerAttr =
+              recipientType === 'contratada' ? 'contratada' : recipientType === 'adherente' ? 'adherente' : 'titular';
+
             if (isElectronicSignature) {
               const isoTimestamp = new Date().toISOString();
               const signedDate = new Date();
@@ -737,6 +807,7 @@ export const useSubmitSignatureLink = () => {
 
               let signerName = '';
               let signerCI = '';
+              let signerDocumentLabel = 'C.I.';
               let roleLabel = 'CONTRATANTE';
 
               // Función auxiliar: determina si una persona es menor de edad
@@ -779,9 +850,15 @@ export const useSubmitSignatureLink = () => {
                 signerCI = companySettings?.contratada_signer_dni || '';
                 roleLabel = 'CONTRATADA';
               } else {
-                // Titular
+                // Titular. Orden deliberado:
+                //  1) persona jurídica (empresa)  2) titular menor con responsable de pago  3) titular adulto
                 const titularIsMinor = isMinorAge(saleClientInfo?.birth_date);
-                if (titularIsMinor && saleSignerInfo) {
+                if (saleClientInfo?.client_type === 'empresa') {
+                  // Persona jurídica: firma como CONTRATANTE con razón social + RUC
+                  signerName = getClientDisplayName(saleClientInfo);
+                  signerCI = getClientDocument(saleClientInfo);
+                  signerDocumentLabel = getClientDocumentLabel(saleClientInfo);
+                } else if (titularIsMinor && saleSignerInfo) {
                   // Titular menor de edad: responsable de pago firma contrato Y DDJJ
                   signerName = saleSignerInfo.nombre;
                   signerCI = saleSignerInfo.ci;
@@ -804,7 +881,6 @@ export const useSubmitSignatureLink = () => {
               let electronicBlock: string;
               if (useV1) {
                 // v1.0 — Detailed block with metadata
-                const signerAttr = recipientType === 'contratada' ? 'contratada' : recipientType === 'adherente' ? 'adherente' : 'titular';
                 electronicBlock = `
                   <div data-signer="${signerAttr}" style="display:inline-block;vertical-align:top;width:48%;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#111;border:1px solid #ccc;border-radius:6px;padding:10px;">
                     <table style="width:100%;border-collapse:collapse;font-size:10px;">
@@ -819,20 +895,19 @@ export const useSubmitSignatureLink = () => {
                     <div style="border-top:1px solid #333;width:80%;margin:6px 0 4px 0;"></div>
                     <p style="margin:0;text-align:center;font-weight:bold;font-size:10px;">${roleLabel}</p>
                     <p style="margin:2px 0 0 0;font-size:10px;">Aclaración: ${signerName || '.............................'}</p>
-                    <p style="margin:2px 0 0 0;font-size:10px;">C.I.Nº: ${signerCI || '.............................'}</p>
+                    <p style="margin:2px 0 0 0;font-size:10px;">${signerDocumentLabel} Nº: ${signerCI || '.............................'}</p>
                   </div>
                 `;
               } else {
                 // v2.0 — Professional block matching reference PDF format
-                const signerAttrV2 = recipientType === 'contratada' ? 'contratada' : recipientType === 'adherente' ? 'adherente' : 'titular';
                 electronicBlock = `
-                  <div data-signer="${signerAttrV2}" style="display:inline-block;vertical-align:top;width:48%;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#111;">
+                  <div data-signer="${signerAttr}" style="display:inline-block;vertical-align:top;width:48%;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#111;">
                     <p style="margin:0 0 2px 0;font-size:11px;">Firmado electrónicamente por: <strong>${signerName}</strong></p>
                     <p style="margin:0 0 12px 0;font-size:11px;">Fecha: ${formattedDate}</p>
                     <div style="border-top:1px solid #555;width:80%;margin:0 0 6px 0;"></div>
                     <p style="margin:0;font-size:11px;font-weight:bold;">${roleLabel}</p>
                     <p style="margin:4px 0 0 0;font-size:11px;">Aclaración: ${signerName || '.............................'}</p>
-                    <p style="margin:2px 0 0 0;font-size:11px;">C.I.Nº: ${signerCI || '.............................'}</p>
+                    <p style="margin:2px 0 0 0;font-size:11px;">${signerDocumentLabel} Nº: ${signerCI || '.............................'}</p>
                   </div>
                 `;
               }
@@ -841,14 +916,14 @@ export const useSubmitSignatureLink = () => {
             } else {
               const signatureImg = `<img src="${signatureData}" alt="Firma digital" style="max-width:280px;max-height:120px;display:block;" />`;
               signatureImgWithDate = `
-                <div style="text-align:center;">
+                <div data-signer="${signerAttr}" style="text-align:center;">
                   ${signatureImg}
                   <p style="margin:4px 0 0 0;font-size:10px;color:#6b7280;">Firmado el: ${safeSignedAt}</p>
                 </div>
               `;
               signatureBlock = `
                 <hr style="margin:24px 0;border:none;border-top:1px solid #d1d5db;" />
-                <section style="padding:16px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;">
+                <section data-signer="${signerAttr}" style="padding:16px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;">
                   <h4 style="margin:0 0 8px 0;font-size:14px;">Firma Digital Incrustada</h4>
                   <p style="margin:0 0 8px 0;font-size:12px;color:#4b5563;">
                     Firmado el: ${safeSignedAt}
@@ -920,8 +995,7 @@ export const useSubmitSignatureLink = () => {
             // (Contratada will sign in their own step)
             if (recipientType !== 'contratada') {
               const empresaRange = findFullSignatureDiv(finalContent, 'empresa');
-              if (empresaRange) {
-                const emptyContratadaBlock = `
+              const emptyContratadaBlock = `
                   <div style="display:inline-block;vertical-align:top;width:48%;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#111;">
                     <p style="margin:0 0 12px 0;font-size:11px;">Pendiente firma de la empresa</p>
                     <hr style="border:none;border-top:1px solid #555;width:80%;margin:0 0 6px 0;" />
@@ -930,11 +1004,19 @@ export const useSubmitSignatureLink = () => {
                     <p style="margin:2px 0 0 0;font-size:11px;">C.I.Nº: .............................</p>
                   </div>
                 `;
+              if (empresaRange) {
                 finalContent =
                   finalContent.substring(0, empresaRange.start) +
                   emptyContratadaBlock +
                   finalContent.substring(empresaRange.end);
               }
+              // Plantillas mustache (ej. Plan Materno): dejar el hueco de la contratada con el
+              // mismo texto "Pendiente firma de la empresa" que el merge de la contratada sabe
+              // reemplazar. Sin ancho fijo: el placeholder ya está dentro de su columna.
+              finalContent = finalContent.replace(
+                /\{\{\s*firma_(contratada|empresa)\s*\}\}/gi,
+                emptyContratadaBlock.replace('width:48%;', '')
+              );
             }
 
             // Limpieza de texto de atributos que se filtró de la sanitización.
@@ -984,7 +1066,12 @@ export const useSubmitSignatureLink = () => {
             const isContractDoc = doc.document_type === 'contrato' || doc.name?.toLowerCase().includes('contrato');
             // Solo concatenar si el bloque de la otra parte NO está ya presente:
             // si el merge previo lo insertó, agregarlo de nuevo duplicaba la firma.
-            const yaTieneOtraParte = finalContent.includes(`data-signer="${otherPartyType}"`);
+            // Además del marcador, el hueco "Pendiente firma de la empresa" cuenta como "la
+            // contratada ya tiene su lugar": appendear ahí su bloque viejo dejaría DOS bloques
+            // de contratada cuando vuelva a firmar (ella reemplaza el hueco). Ver bug #13.
+            const yaTieneOtraParte =
+              finalContent.includes(`data-signer="${otherPartyType}"`) ||
+              (otherPartyType === 'contratada' && finalContent.includes('Pendiente firma de la empresa'));
             if (
               isContractDoc &&
               existingOtherPartyBlock &&
